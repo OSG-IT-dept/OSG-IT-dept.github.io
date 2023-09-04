@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Image Overlay</title>
+    <title>OSG ORG</title>
     <style>
         /* Basic styling */
         body {
@@ -30,13 +30,44 @@
             width: 100%; /* Ensures the image takes up the full width of its container */
             height: auto;
         }
+        .elements-container {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 50px;
+        }
+        .element {
+            width: 30%; /* Divide by number of elements */
+            text-align: center; /* Center the content */
+        }
     </style>
 </head>
 <body>
 
 <div class="image-container">
-    <img src="osg_emblem_blue.png" alt="Description of Image">
+    <img src="osg_emblem_blue.png" alt="OSG ORG Emblem">
     <div class="overlay-text">Welcome to OSG Org site</div>
+</div>
+
+<div class="elements-container">
+    <div class="element">
+        <a href="#">
+            <img src="path_to_animals_image.jpg" alt="Animals">
+        </a>
+        <div class="overlay-text">Animals</div>
+    </div>
+    <!-- Example for additional elements -->
+    <div class="element">
+        <a href="#">
+            <img src="path_to_second_image.jpg" alt="Second Image">
+        </a>
+        <div class="overlay-text">Second Image Text</div>
+    </div>
+    <div class="element">
+        <a href="#">
+            <img src="path_to_third_image.jpg" alt="Third Image">
+        </a>
+        <div class="overlay-text">Third Image Text</div>
+    </div>
 </div>
 
 </body>
