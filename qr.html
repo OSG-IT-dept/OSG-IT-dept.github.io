@@ -1,55 +1,64 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Item Info</title>
-<style>
-body {
-font-family: Arial, sans-serif;
-padding: 20px;
-background-color: #f4f4f4;
-}
-.item-frame {
-max-width: 400px;
-margin: 0 auto;
-padding: 20px;
-background: #fff;
-border: 1px solid #ccc;
-border-radius: 8px;
-box-shadow: 0 0 10px rgba(0,0,0,0.1);
-}
-.item-frame h2 {
-font-size: 20px;
-margin-bottom: 10px;
-color: #333;
-}
-.item-detail {
-margin-bottom: 10px;
-}
-.label {
-font-weight: bold;
-}
-.disclaimer {
-font-size: 12px;
-color: #666;
-margin-top: 20px;
-border-top: 1px solid #ddd;
-padding-top: 10px;
-}
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Item Info</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background-color: #f4f4f4;
+    }
+    .item-frame {
+      max-width: 400px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    .item-frame h2 {
+      font-size: 20px;
+      margin-bottom: 10px;
+      color: #333;
+    }
+    .item-detail {
+      margin-bottom: 10px;
+    }
+    .label {
+      font-weight: bold;
+    }
+    .disclaimer {
+      font-size: 12px;
+      color: #666;
+      margin-top: 20px;
+      border-top: 1px solid #ddd;
+      padding-top: 10px;
+    }
+  </style>
 </head>
 <body>
-<div class="item-frame">
-<h2>Item Information</h2>
-<div class="item-detail"><span class="label">Item Code:</span> EL01U2501001</div>
-<div class="item-detail"><span class="label">Description:</span> MacBook Pro 14"</div>
-<div class="item-detail"><span class="label">SKU:</span> EL01U</div>
-<div class="item-detail"><span class="label">Assigned To:</span> John Doe</div>
-<div class="disclaimer">
-Disclaimer: If found, please contact +34 964 868 634 or email <a href="mailto:lostandfound@mycompany.com">lostandfound@mycompany.com</a>.<br>
-Visit us at <a href="https://www.mycompany.com">www.mycompany.com</a>
-</div>
-</div>
+  <div class="item-frame">
+    <h2>Item Information</h2>
+    <div class="item-detail"><span class="label">Item Code:</span> <span id="item"></span></div>
+    <div class="item-detail"><span class="label">Description:</span> <span id="desc"></span></div>
+    <div class="item-detail"><span class="label">SKU:</span> <span id="sku"></span></div>
+    <div class="item-detail"><span class="label">Assigned To:</span> <span id="assigned"></span></div>
+    <div class="disclaimer">
+      Disclaimer: If found, please contact +34 964 868 634 or email 
+      <a href="mailto:lostandfound@orinocosurvey.com">lostandfound@orinocosurvey.com</a>.<br>
+      Visit us at <a href="https://www.orinocosurvey.com">www.orinocosurvey.com</a>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    document.getElementById("item").textContent = params.get("item") || "N/A";
+    document.getElementById("desc").textContent = params.get("desc") || "N/A";
+    document.getElementById("sku").textContent = params.get("sku") || "N/A";
+    document.getElementById("assigned").textContent = params.get("assigned") || "N/A";
+  </script>
 </body>
 </html>
