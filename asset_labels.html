@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Label Sheet Designer & Printer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    @media print { body { margin: 0 !important; background: white !important; } }
+  </style>
+</head>
+<body class="bg-neutral-50">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useMemo, useRef, useState } = React;
+
+    const mm = (n) => `${n}mm`;
+
+    function parseCSV(text) {
+      const lines = text.replace(/\r/g, "\n").split(/\n+/).filter(Boolean);
+      const cells = lines.map((line) => (line.split(",")[0] || "").trim());
+      return cells;
+    }
+    const range = (n) => Array.from({ length: n }, (_, i) => i);
+
+    function App(){
+      const [page, setPage] = useState({ width: 210, height: 297 });
+      const [margins, setMargins] = useState({ top: 10, right: 10, bottom: 10, left: 10 });
+      const [shape, setShape] = useState("round");
+      const [label, setLabel] = useState({ width: 10, height: 10 });
+      const [spacing, setSpacing] = useState({ h: 2, v: 3 });
+      const [grid, setGrid] = useState({ cols: 9, rows: 14 });
+      const [showOutlines, setShowOutlines] = useState(true);
+      const [fontSize, setFontSize] = useState(8);
+      const [fontWeight, setFontWeight] = useState("500");
+      const [contentAlign, setContentAlign] = useState("center");
+      const [codes, setCodes] = useState([]);
+      const [seq, setSeq] = useState({ enabled: true, prefix: "RND-", start: 1, pad: 3 });
+
+      const inner = useMemo(() => ({
+        width: page.width - margins.left - margins.right,
+        height: page.height - margins.top - margins.bottom,
+      }), [page, margins]);
+
+      const pitch = useMemo(() => ({
+        h: label.width + spacing.h,
+        v: label.height + spacing.v,
+      }), [label, spacing]);
+
+      const totalCells = grid.cols * grid.rows;
+
+      const data = useMemo(() => {
+        let values = [];
+        if (seq.enabled) {
+          for (let i = 0; i < totalCells; i++) {
+            const n = seq.start + i;
+            const num = String(n).padStart(seq.pad, "0");
+            values.push(`${seq.prefix}${num}`);
+          }
+        } else {
+          values = [...codes];
+          if (values.length < totalCells) values = values.concat(Array(totalCells - values.length).fill(""));
+          values = values.slice(0, totalCells);
+        }
+        return values;
+      }, [seq, codes, totalCells]);
+
+      const printCSS = useMemo(() => (
+        `@page { size: ${page.width}mm ${page.height}mm; margin: 0; }\n` +
+        `@media print { body { margin: 0 !important; } }`
+      ), [page.width, page.height]);
+
+      const onCSVUpload = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const text = await file.text();
+        const arr = parseCSV(text);
+        setCodes(arr);
+        setSeq((s) => ({ ...s, enabled: false }));
+      };
+
+      const containerStyle = {
+        width: mm(page.width),
+        height: mm(page.height),
+        boxShadow: "0 0 0 1px rgba(0,0,0,0.08)",
+      };
+      const sheetStyle = {
+        position: "relative",
+        width: mm(inner.width),
+        height: mm(inner.height),
+        marginTop: mm(margins.top),
+        marginLeft: mm(margins.left),
+        background: "white",
+      };
+      const cellStyle = (r,c) => ({
+        position: "absolute",
+        left: mm(c * pitch.h),
+        top: mm(r * pitch.v),
+        width: mm(label.width),
+        height: mm(label.height),
+        border: showOutlines ? "0.2mm dashed rgba(0,0,0,0.35)" : "none",
+        borderRadius: shape === "round" ? "9999px" : "8px",
+        display: "flex",
+        alignItems: contentAlign === "center" ? "center" : contentAlign === "top" ? "flex-start" : "flex-end",
+        justifyContent: "center",
+        fontSize: `${fontSize}pt`,
+        fontWeight,
+        textAlign: "center",
+        padding: 0,
+        lineHeight: 1.1,
+        overflow: "hidden",
+      });
+
+      const canFit = inner.width >= (grid.cols - 1) * spacing.h + grid.cols * label.width
+        && inner.height >= (grid.rows - 1) * spacing.v + grid.rows * label.height;
+
+      return (
+        <div className="w-full min-h-screen p-4 md:p-8">
+          <style>{printCSS}</style>
+          <div className="max-w-6xl mx-auto grid md:grid-cols-[360px,1fr] gap-6">
+            <div className="bg-white rounded-2xl shadow p-4 md:p-6 space-y-4 print:hidden">
+              <h1 className="text-xl font-semibold">Label Sheet Designer</h1>
+              <p className="text-sm text-neutral-500">All units in millimeters (mm). Use the preview, then click Print.</p>
+
+              <section className="space-y-2">
+                <h2 className="font-medium">Page</h2>
+                <div className="grid grid-cols-3 gap-2">
+                  <NumberField label="Width" value={page.width} onChange={(v)=>setPage(p=>({...p,width:v}))} />
+                  <NumberField label="Height" value={page.height} onChange={(v)=>setPage(p=>({...p,height:v}))} />
+                  <div className="flex items-end"><button className="w-full rounded-xl border px-3 py-2" onClick={()=>setPage(p=>({ width: p.height, height: p.width }))}>Swap W/H</button></div>
+                </div>
+                <div className="grid grid-cols-4 gap-2">
+                  <NumberField label="Top" value={margins.top} onChange={(v)=>setMargins(m=>({...m,top:v}))} />
+                  <NumberField label="Right" value={margins.right} onChange={(v)=>setMargins(m=>({...m,right:v}))} />
+                  <NumberField label="Bottom" value={margins.bottom} onChange={(v)=>setMargins(m=>({...m,bottom:v}))} />
+                  <NumberField label="Left" value={margins.left} onChange={(v)=>setMargins(m=>({...m,left:v}))} />
+                </div>
+              </section>
+
+              <section className="space-y-2">
+                <h2 className="font-medium">Label</h2>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="flex items-center gap-2"><input id="round" type="radio" checked={shape==='round'} onChange={()=>setShape('round')} /><label htmlFor="round">Round</label></div>
+                  <div className="flex items-center gap-2"><input id="rect" type="radio" checked={shape==='rect'} onChange={()=>setShape('rect')} /><label htmlFor="rect">Rectangular</label></div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <NumberField label={shape==='round' ? 'Diameter' : 'Width'} value={label.width} onChange={(v)=>setLabel(l=>({...l,width:v}))} />
+                  <NumberField label={shape==='round' ? 'Diameter (same)' : 'Height'} value={label.height} onChange={(v)=>setLabel(l=>({...l,height:v}))} />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <NumberField label="H Spacing" value={spacing.h} onChange={(v)=>setSpacing(s=>({...s,h:v}))} />
+                  <NumberField label="V Spacing" value={spacing.v} onChange={(v)=>setSpacing(s=>({...s,v:v}))} />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <NumberField label="Columns" value={grid.cols} onChange={(v)=>setGrid(g=>({...g,cols:Math.max(1,Math.floor(v))}))} />
+                  <NumberField label="Rows" value={grid.rows} onChange={(v)=>setGrid(g=>({...g,rows:Math.max(1,Math.floor(v))}))} />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <NumberField label="Font size (pt)" value={fontSize} onChange={setFontSize} />
+                  <SelectField label="Weight" value={fontWeight} onChange={setFontWeight} options={[
+                    {label:'400', value:'400'},{label:'500', value:'500'},{label:'600', value:'600'},{label:'700', value:'700'}
+                  ]} />
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-sm">
+                  <button className={`rounded-xl border px-3 py-2 ${contentAlign==='top'?'bg-neutral-100':''}`} onClick={()=>setContentAlign('top')}>Top</button>
+                  <button className={`rounded-xl border px-3 py-2 ${contentAlign==='center'?'bg-neutral-100':''}`} onClick={()=>setContentAlign('center')}>Center</button>
+                  <button className={`rounded-xl border px-3 py-2 ${contentAlign==='bottom'?'bg-neutral-100':''}`} onClick={()=>setContentAlign('bottom')}>Bottom</button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input id="outlines" type="checkbox" checked={showOutlines} onChange={(e)=>setShowOutlines(e.target.checked)} />
+                  <label htmlFor="outlines">Show outlines</label>
+                </div>
+              </section>
+
+              <section className="space-y-2">
+                <h2 className="font-medium">Content</h2>
+                <div className="flex items-center gap-2 text-sm">
+                  <input id="seq" type="checkbox" checked={seq.enabled} onChange={(e)=>setSeq(s=>({...s,enabled:e.target.checked}))} />
+                  <label htmlFor="seq">Use sequential codes</label>
+                </div>
+                {seq.enabled ? (
+                  <div className="grid grid-cols-3 gap-2">
+                    <TextField label="Prefix" value={seq.prefix} onChange={(v)=>setSeq(s=>({...s,prefix:v}))} />
+                    <NumberField label="Start" value={seq.start} onChange={(v)=>setSeq(s=>({...s,start:Math.max(0,Math.floor(v))}))} />
+                    <NumberField label="Pad" value={seq.pad} onChange={(v)=>setSeq(s=>({...s,pad:Math.max(0,Math.floor(v))}))} />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <input type="file" accept=".csv,.txt" onChange={onCSVUpload} />
+                    <p className="text-xs text-neutral-500">Upload CSV/TXT with one code per line (or first column).</p>
+                  </div>
+                )}
+              </section>
+
+              <div className="flex gap-2 pt-2">
+                <button className="rounded-xl border px-3 py-2" onClick={()=>window.print()}>Print</button>
+                <button className="rounded-xl border px-3 py-2" onClick={()=>{
+                  setPage({ width: 210, height: 297 });
+                  setMargins({ top: 10, right: 10, bottom: 10, left: 10 });
+                  setShape('round');
+                  setLabel({ width: 10, height: 10 });
+                  setSpacing({ h: 2, v: 3 });
+                  setGrid({ cols: 9, rows: 14 });
+                  setSeq({ enabled: true, prefix: 'RND-', start: 1, pad: 3 });
+                  setShowOutlines(true);
+                }}>Load 10mm round (9×14)</button>
+              </div>
+
+              {!canFit && (
+                <div className="text-sm text-red-600">⚠️ Grid does not fit the inner area (margins). Reduce label size, spacing, margins, or columns/rows.</div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-2xl shadow p-4 md:p-6 overflow-auto">
+              <div className="mb-3 text-sm text-neutral-600 print:hidden">
+                Page: {page.width}×{page.height} mm — Inner: {inner.width.toFixed(1)}×{inner.height.toFixed(1)} mm — Pitch: {pitch.h}×{pitch.v} mm
+              </div>
+              <div className="mx-auto" style={containerStyle}>
+                <div style={sheetStyle}>
+                  {range(grid.rows).map((r) => (
+                    range(grid.cols).map((c) => {
+                      const idx = r * grid.cols + c;
+                      return (
+                        <div key={`${r}-${c}`} style={cellStyle(r, c)}>
+                          <span className="px-1 truncate w-full">{data[idx] ?? ''}</span>
+                        </div>
+                      );
+                    })
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <style>{`
+            @media print { .print:hidden { display: none !important; } }
+          `}</style>
+        </div>
+      );
+    }
+
+    function NumberField({ label, value, onChange, step = 1 }){
+      return (
+        <label className="grid gap-1 text-sm">
+          <span className="text-neutral-600">{label}</span>
+          <input type="number" className="rounded-xl border px-3 py-2" value={value} step={step}
+            onChange={(e)=>onChange(Number(e.target.value))} />
+        </label>
+      );
+    }
+    function TextField({ label, value, onChange }){
+      return (
+        <label className="grid gap-1 text-sm">
+          <span className="text-neutral-600">{label}</span>
+          <input type="text" className="rounded-xl border px-3 py-2" value={value} onChange={(e)=>onChange(e.target.value)} />
+        </label>
+      );
+    }
+    function SelectField({ label, value, onChange, options }){
+      return (
+        <label className="grid gap-1 text-sm">
+          <span className="text-neutral-600">{label}</span>
+          <select className="rounded-xl border px-3 py-2" value={value} onChange={(e)=>onChange(e.target.value)}>
+            {options.map((o)=> <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
