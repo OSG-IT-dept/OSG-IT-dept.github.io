@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sprite Sheet Splitter</title>
+  <style>
+    :root{
+      --ink:#1f2937; /* slate-800 */
+      --ink-2:#374151; /* slate-700 */
+      --accent:#2563eb; /* blue-600 */
+      --paper:#f3e9d2; /* old paper */
+      --paper-2:#e9dfc3;
+      --shadow:0 10px 25px rgba(0,0,0,.15);
+      --radius:18px;
+    }
+    html,body{height:100%;}
+    body{
+      margin:0; font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      color:var(--ink); background:
+        radial-gradient(ellipse at top left, rgba(0,0,0,.05), transparent 60%),
+        radial-gradient(ellipse at bottom right, rgba(0,0,0,.05), transparent 60%),
+        url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 1200 1200"><filter id="f"><feTurbulence baseFrequency="0.8" numOctaves="2"/><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncA type="table" tableValues="0 .06 .12 .18 .12 .06 0"/></feComponentTransfer><feGaussianBlur stdDeviation=".5"/></filter><rect width="1200" height="1200" fill="%23f3e9d2"/><rect width="1200" height="1200" filter="url(%23f)"/></svg>')
+        , var(--paper);
+      background-size: cover, cover, 700px 700px, auto;
+    }
+    header{
+      position:sticky; top:0; z-index:10; backdrop-filter: blur(6px);
+      background: color-mix(in oklab, var(--paper) 80%, white);
+      border-bottom: 1px solid rgba(0,0,0,.06);
+    }
+    .wrap{max-width:1100px; margin:0 auto; padding:16px;}
+    h1{margin:0; font-size:clamp(22px, 3vw, 32px); letter-spacing:.3px;}
+
+    .card{background:linear-gradient(180deg, var(--paper), var(--paper-2)); border:1px solid rgba(0,0,0,.08); border-radius:var(--radius); box-shadow:var(--shadow); padding:16px;}
+    .grid{display:grid; gap:16px; grid-template-columns: 1fr;}
+    @media (min-width: 980px){ .grid{ grid-template-columns: 1.2fr .8fr; } }
+
+    .drop{
+      border:2px dashed rgba(31,41,55,.35); border-radius:var(--radius);
+      padding:18px; text-align:center; cursor:pointer; position:relative; transition:.2s border-color;
+    }
+    .drop.dragover{ border-color: var(--accent); }
+    .drop input{ position:absolute; inset:0; opacity:0; cursor:pointer; }
+
+    .controls{ display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:12px; align-items:end; }
+    .controls .field{ display:flex; flex-direction:column; gap:6px; }
+    label{ font-weight:600; font-size:14px; }
+    input[type="number"], input[type="range"]{ width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(0,0,0,.12); background:#fff; font-size:16px; }
+    input[type="range"]{ padding:0; height:36px; }
+    .btns{ display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
+    button{ background:var(--ink); color:#fff; border:none; padding:10px 14px; border-radius:12px; cursor:pointer; font-weight:600; box-shadow: 0 6px 14px rgba(0,0,0,.15); }
+    button.secondary{ background:#fff; color:var(--ink-2); border:1px solid rgba(0,0,0,.12); }
+    button:disabled{ opacity:.5; cursor:not-allowed; }
+
+    .stage{ position:relative; border-radius:14px; overflow:hidden; background:#fff; border:1px solid rgba(0,0,0,.08); }
+    .stage canvas{ display:block; width:100%; height:auto; }
+    .grid-overlay{ position:absolute; inset:0; pointer-events:none; }
+
+    .info{ font-size:14px; opacity:.85; }
+    .info strong{ font-weight:700; }
+
+    .thumbs{ display:grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap:12px; }
+    .thumb{ background:#fff; border:1px solid rgba(0,0,0,.1); border-radius:12px; padding:8px; display:flex; flex-direction:column; align-items:center; gap:6px; }
+    .thumb img{ width:100%; height:auto; image-rendering: pixelated; }
+    .thumb a{ text-decoration:none; font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+
+    .warn{ background:#fff3cd; border:1px solid #ffe69c; color:#7a5b00; padding:8px 12px; border-radius:10px; font-size:14px; }
+    footer{ text-align:center; padding:24px; color:#6b7280; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap" style="display:flex; align-items:center; gap:14px;">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 4h16v16H4z" stroke="currentColor" stroke-width="1.6"/><path d="M8 4v16M4 8h16" stroke="currentColor" stroke-width="1.2"/></svg>
+      <h1>Sprite Sheet Splitter</h1>
+    </div>
+  </header>
+
+  <main class="wrap" style="margin-top:16px;">
+    <div class="grid">
+      <section class="card" id="left">
+        <div class="drop" id="drop">
+          <input type="file" id="file" accept="image/png,image/webp,image/jpeg,image/gif,image/bmp,image/svg+xml" />
+          <div>
+            <strong>Drop your sprite sheet</strong> here or click to browse.
+            <div class="info" style="margin-top:6px;">PNG recommended to preserve transparency.</div>
+          </div>
+        </div>
+        <div id="imgInfo" class="info" style="display:none; margin-top:12px;"></div>
+        <div id="remainderWarn" class="warn" style="display:none; margin:12px 0 0;"></div>
+        <div class="stage" style="margin-top:12px; display:none;">
+          <canvas id="preview"></canvas>
+          <canvas id="grid" class="grid-overlay"></canvas>
+        </div>
+      </section>
+
+      <section class="card" id="right">
+        <div class="controls">
+          <div class="field">
+            <label for="rows">Rows</label>
+            <input id="rows" type="number" min="1" value="1" />
+          </div>
+          <div class="field">
+            <label for="cols">Columns</label>
+            <input id="cols" type="number" min="1" value="1" />
+          </div>
+          <div class="field">
+            <label for="rowsRange">Rows (slider)</label>
+            <input id="rowsRange" type="range" min="1" max="32" value="1" />
+          </div>
+          <div class="field">
+            <label for="colsRange">Columns (slider)</label>
+            <input id="colsRange" type="range" min="1" max="32" value="1" />
+          </div>
+        </div>
+        <div class="info" id="cellInfo" style="margin:12px 0 0;">—</div>
+        <div class="btns">
+          <button id="splitBtn" disabled>Split & Preview</button>
+          <button class="secondary" id="dlAllBtn" disabled>Download all (.zip)</button>
+          <button class="secondary" id="clearBtn">Clear</button>
+        </div>
+
+        <div id="thumbs" class="thumbs" style="margin-top:16px;"></div>
+      </section>
+    </div>
+    <footer>Designed for crisp sprites on an old‑paper desk ✨</footer>
+  </main>
+
+  <!-- JSZip for zipping downloads -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script>
+    const els = {
+      file: document.getElementById('file'),
+      drop: document.getElementById('drop'),
+      rows: document.getElementById('rows'),
+      cols: document.getElementById('cols'),
+      rowsRange: document.getElementById('rowsRange'),
+      colsRange: document.getElementById('colsRange'),
+      splitBtn: document.getElementById('splitBtn'),
+      dlAllBtn: document.getElementById('dlAllBtn'),
+      clearBtn: document.getElementById('clearBtn'),
+      preview: document.getElementById('preview'),
+      grid: document.getElementById('grid'),
+      stage: document.querySelector('.stage'),
+      imgInfo: document.getElementById('imgInfo'),
+      cellInfo: document.getElementById('cellInfo'),
+      warn: document.getElementById('remainderWarn'),
+      thumbs: document.getElementById('thumbs'),
+    };
+
+    let img = new Image();
+    img.onload = () => {
+      const w = img.naturalWidth, h = img.naturalHeight;
+      els.preview.width = w; els.preview.height = h;
+      els.grid.width = w; els.grid.height = h;
+      const ctx = els.preview.getContext('2d');
+      ctx.clearRect(0,0,w,h);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, 0, 0);
+      els.stage.style.display = 'block';
+      els.imgInfo.style.display = 'block';
+      els.imgInfo.innerText = `Image size: ${w} × ${h} px`;
+      updateGrid();
+      els.splitBtn.disabled = false;
+      els.dlAllBtn.disabled = true;
+      els.thumbs.innerHTML = '';
+    };
+
+    function loadFile(file){
+      if(!file) return;
+      const url = URL.createObjectURL(file);
+      img.src = url;
+    }
+
+    // Drag & drop
+    ['dragenter','dragover'].forEach(ev=>{
+      els.drop.addEventListener(ev, e=>{ e.preventDefault(); e.stopPropagation(); els.drop.classList.add('dragover'); });
+    });
+    ['dragleave','drop'].forEach(ev=>{
+      els.drop.addEventListener(ev, e=>{ e.preventDefault(); e.stopPropagation(); els.drop.classList.remove('dragover'); });
+    });
+    els.drop.addEventListener('drop', e=>{ const f = e.dataTransfer.files?.[0]; loadFile(f); });
+    els.file.addEventListener('change', e=> loadFile(e.target.files?.[0]));
+
+    // Sync number <-> range inputs
+    function link(a,b){
+      a.addEventListener('input', ()=>{ b.value = a.value; updateGrid(); });
+      b.addEventListener('input', ()=>{ a.value = b.value; updateGrid(); });
+    }
+    link(els.rows, els.rowsRange); link(els.cols, els.colsRange);
+
+    function updateGrid(){
+      const rows = Math.max(1, parseInt(els.rows.value||'1',10));
+      const cols = Math.max(1, parseInt(els.cols.value||'1',10));
+      els.rows.value = rows; els.rowsRange.value = rows;
+      els.cols.value = cols; els.colsRange.value = cols;
+      if(!img.naturalWidth) return;
+
+      const w = img.naturalWidth, h = img.naturalHeight;
+      const cellW = Math.floor(w/cols), cellH = Math.floor(h/rows);
+      const remW = w - cellW*cols; const remH = h - cellH*rows;
+
+      els.cellInfo.innerHTML = `Each cell: <strong>${cellW}×${cellH}</strong> px · Total slices: <strong>${rows*cols}</strong>`;
+      if(remW || remH){
+        els.warn.style.display = 'block';
+        els.warn.textContent = `Note: ${remW} px leftover horizontally and ${remH} px vertically. The splitter uses floor() per cell; right/bottom edges may be cropped by up to the remainder.`;
+      } else {
+        els.warn.style.display = 'none';
+      }
+
+      // Draw grid overlay
+      const g = els.grid.getContext('2d');
+      g.clearRect(0,0,els.grid.width, els.grid.height);
+      g.strokeStyle = 'rgba(37,99,235,.7)';
+      g.lineWidth = 1;
+      // vertical lines
+      for(let c=1; c<cols; c++){
+        const x = Math.round(c*cellW)+.5; g.beginPath(); g.moveTo(x,0); g.lineTo(x,h); g.stroke();
+      }
+      // horizontal lines
+      for(let r=1; r<rows; r++){
+        const y = Math.round(r*cellH)+.5; g.beginPath(); g.moveTo(0,y); g.lineTo(w,y); g.stroke();
+      }
+    }
+
+    els.rows.addEventListener('input', updateGrid);
+    els.cols.addEventListener('input', updateGrid);
+
+    function split(){
+      if(!img.naturalWidth) return;
+      const rows = parseInt(els.rows.value,10), cols = parseInt(els.cols.value,10);
+      const w = img.naturalWidth, h = img.naturalHeight;
+      const cellW = Math.floor(w/cols), cellH = Math.floor(h/rows);
+      const tiles = [];
+      const work = document.createElement('canvas');
+      work.width = cellW; work.height = cellH;
+      const wctx = work.getContext('2d');
+      wctx.imageSmoothingEnabled = false;
+
+      els.thumbs.innerHTML = '';
+
+      for(let r=0; r<rows; r++){
+        for(let c=0; c<cols; c++){
+          const sx = c*cellW, sy = r*cellH;
+          wctx.clearRect(0,0,cellW,cellH);
+          wctx.drawImage(img, sx, sy, cellW, cellH, 0, 0, cellW, cellH);
+          const dataURL = work.toDataURL('image/png');
+          const idx = r*cols + c;
+          const name = `sprite_${String(idx).padStart(3,'0')}.png`;
+          tiles.push({ name, dataURL });
+          addThumb(name, dataURL);
+        }
+      }
+
+      els.dlAllBtn.disabled = tiles.length === 0;
+      els.dlAllBtn.onclick = () => downloadZip(tiles);
+    }
+
+    function addThumb(name, dataURL){
+      const el = document.createElement('div'); el.className = 'thumb';
+      const img = document.createElement('img'); img.src = dataURL; img.alt = name;
+      const link = document.createElement('a'); link.href = dataURL; link.download = name; link.textContent = name;
+      const mini = document.createElement('button'); mini.textContent = 'Download'; mini.onclick = ()=>{ const a=document.createElement('a'); a.href=dataURL; a.download=name; a.click(); };
+      el.appendChild(img); el.appendChild(link); el.appendChild(mini);
+      els.thumbs.appendChild(el);
+    }
+
+    async function downloadZip(tiles){
+      const zip = new JSZip();
+      tiles.forEach(t => zip.file(t.name, t.dataURL.split(',')[1], {base64:true}));
+      const blob = await zip.generateAsync({type:'blob'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'sprites.zip';
+      a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+    }
+
+    els.splitBtn.addEventListener('click', split);
+    els.clearBtn.addEventListener('click', ()=>{
+      els.file.value = '';
+      img = new Image();
+      els.stage.style.display = 'none';
+      els.imgInfo.style.display = 'none';
+      els.thumbs.innerHTML = '';
+      els.splitBtn.disabled = true; els.dlAllBtn.disabled = true;
+    });
+  </script>
+</body>
+</html>
