@@ -46,7 +46,7 @@
     .controls{ display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:12px; align-items:end; }
     .controls .field{ display:flex; flex-direction:column; gap:6px; }
     label{ font-weight:600; font-size:14px; }
-    input[type="number"], input[type="range"]{ width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(0,0,0,.12); background:#fff; font-size:16px; }
+    input[type="number"], input[type="range"], input[type="text"]{ width:100%; padding:10px 12px; border-radius:12px; border:1px solid rgba(0,0,0,.12); background:#fff; font-size:16px; }
     input[type="range"]{ padding:0; height:36px; }
     .btns{ display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
     button{ background:var(--ink); color:#fff; border:none; padding:10px 14px; border-radius:12px; cursor:pointer; font-weight:600; box-shadow: 0 6px 14px rgba(0,0,0,.15); }
@@ -107,11 +107,23 @@
           </div>
           <div class="field">
             <label for="rowsRange">Rows (slider)</label>
-            <input id="rowsRange" type="range" min="1" max="32" value="1" />
+            <input id="rowsRange" type="range" min="1" max="64" value="1" />
           </div>
           <div class="field">
             <label for="colsRange">Columns (slider)</label>
-            <input id="colsRange" type="range" min="1" max="32" value="1" />
+            <input id="colsRange" type="range" min="1" max="64" value="1" />
+          </div>
+          <div class="field">
+            <label for="marginX">Margin X (px)</label>
+            <input id="marginX" type="number" min="0" value="0" />
+          </div>
+          <div class="field">
+            <label for="marginY">Margin Y (px)</label>
+            <input id="marginY" type="number" min="0" value="0" />
+          </div>
+          <div class="field" style="grid-column: span 2;">
+            <label for="labelPrefix">File label prefix</label>
+            <input id="labelPrefix" type="text" placeholder="sprite_" value="sprite_" />
           </div>
         </div>
         <div class="info" id="cellInfo" style="margin:12px 0 0;">—</div>
@@ -137,6 +149,9 @@
       cols: document.getElementById('cols'),
       rowsRange: document.getElementById('rowsRange'),
       colsRange: document.getElementById('colsRange'),
+      marginX: document.getElementById('marginX'),
+      marginY: document.getElementById('marginY'),
+      labelPrefix: document.getElementById('labelPrefix'),
       splitBtn: document.getElementById('splitBtn'),
       dlAllBtn: document.getElementById('dlAllBtn'),
       clearBtn: document.getElementById('clearBtn'),
@@ -190,48 +205,69 @@
     }
     link(els.rows, els.rowsRange); link(els.cols, els.colsRange);
 
+    ;['rows','cols','marginX','marginY'].forEach(k=>{
+      els[k].addEventListener('input', updateGrid);
+    });
+
     function updateGrid(){
       const rows = Math.max(1, parseInt(els.rows.value||'1',10));
       const cols = Math.max(1, parseInt(els.cols.value||'1',10));
+      const mx = Math.max(0, parseInt(els.marginX.value||'0',10));
+      const my = Math.max(0, parseInt(els.marginY.value||'0',10));
       els.rows.value = rows; els.rowsRange.value = rows;
       els.cols.value = cols; els.colsRange.value = cols;
+      els.marginX.value = mx; els.marginY.value = my;
       if(!img.naturalWidth) return;
 
       const w = img.naturalWidth, h = img.naturalHeight;
-      const cellW = Math.floor(w/cols), cellH = Math.floor(h/rows);
-      const remW = w - cellW*cols; const remH = h - cellH*rows;
+      const usableW = Math.max(0, w - 2*mx);
+      const usableH = Math.max(0, h - 2*my);
+      const cellW = Math.floor(usableW/cols);
+      const cellH = Math.floor(usableH/rows);
+      const remW = usableW - cellW*cols; 
+      const remH = usableH - cellH*rows;
 
-      els.cellInfo.innerHTML = `Each cell: <strong>${cellW}×${cellH}</strong> px · Total slices: <strong>${rows*cols}</strong>`;
+      els.cellInfo.innerHTML = `Each cell: <strong>${cellW}×${cellH}</strong> px · Total slices: <strong>${rows*cols}</strong> · Usable area: <strong>${usableW}×${usableH}</strong> px`;
       if(remW || remH){
         els.warn.style.display = 'block';
-        els.warn.textContent = `Note: ${remW} px leftover horizontally and ${remH} px vertically. The splitter uses floor() per cell; right/bottom edges may be cropped by up to the remainder.`;
+        els.warn.textContent = `Note: ${remW} px leftover horizontally and ${remH} px vertically inside the margins. The splitter uses floor() per cell; right/bottom edges may be cropped by up to the remainder.`;
       } else {
         els.warn.style.display = 'none';
       }
 
-      // Draw grid overlay
+      // Draw grid overlay with margins
       const g = els.grid.getContext('2d');
       g.clearRect(0,0,els.grid.width, els.grid.height);
       g.strokeStyle = 'rgba(37,99,235,.7)';
       g.lineWidth = 1;
-      // vertical lines
+
+      // margin rectangle
+      g.beginPath();
+      g.rect(mx + 0.5, my + 0.5, usableW - 1, usableH - 1);
+      g.stroke();
+
+      // vertical lines within margins
       for(let c=1; c<cols; c++){
-        const x = Math.round(c*cellW)+.5; g.beginPath(); g.moveTo(x,0); g.lineTo(x,h); g.stroke();
+        const x = Math.round(mx + c*cellW) + 0.5; 
+        g.beginPath(); g.moveTo(x, my); g.lineTo(x, my + usableH); g.stroke();
       }
-      // horizontal lines
+      // horizontal lines within margins
       for(let r=1; r<rows; r++){
-        const y = Math.round(r*cellH)+.5; g.beginPath(); g.moveTo(0,y); g.lineTo(w,y); g.stroke();
+        const y = Math.round(my + r*cellH) + 0.5; 
+        g.beginPath(); g.moveTo(mx, y); g.lineTo(mx + usableW, y); g.stroke();
       }
     }
-
-    els.rows.addEventListener('input', updateGrid);
-    els.cols.addEventListener('input', updateGrid);
 
     function split(){
       if(!img.naturalWidth) return;
       const rows = parseInt(els.rows.value,10), cols = parseInt(els.cols.value,10);
+      const mx = Math.max(0, parseInt(els.marginX.value||'0',10));
+      const my = Math.max(0, parseInt(els.marginY.value||'0',10));
+      const prefix = (els.labelPrefix.value || 'sprite_').trim();
       const w = img.naturalWidth, h = img.naturalHeight;
-      const cellW = Math.floor(w/cols), cellH = Math.floor(h/rows);
+      const usableW = Math.max(0, w - 2*mx);
+      const usableH = Math.max(0, h - 2*my);
+      const cellW = Math.floor(usableW/cols), cellH = Math.floor(usableH/rows);
       const tiles = [];
       const work = document.createElement('canvas');
       work.width = cellW; work.height = cellH;
@@ -242,12 +278,13 @@
 
       for(let r=0; r<rows; r++){
         for(let c=0; c<cols; c++){
-          const sx = c*cellW, sy = r*cellH;
+          const sx = mx + c*cellW, sy = my + r*cellH;
           wctx.clearRect(0,0,cellW,cellH);
           wctx.drawImage(img, sx, sy, cellW, cellH, 0, 0, cellW, cellH);
           const dataURL = work.toDataURL('image/png');
           const idx = r*cols + c;
-          const name = `sprite_${String(idx).padStart(3,'0')}.png`;
+          const safePrefix = prefix.replace(/[^a-zA-Z0-9_\-]/g, '_');
+          const name = `${safePrefix}${String(idx).padStart(3,'0')}.png`;
           tiles.push({ name, dataURL });
           addThumb(name, dataURL);
         }
@@ -285,6 +322,7 @@
       els.imgInfo.style.display = 'none';
       els.thumbs.innerHTML = '';
       els.splitBtn.disabled = true; els.dlAllBtn.disabled = true;
+      const g = els.grid.getContext('2d'); g.clearRect(0,0,els.grid.width, els.grid.height);
     });
   </script>
 </body>
