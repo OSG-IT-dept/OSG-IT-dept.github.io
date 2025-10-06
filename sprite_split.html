@@ -36,10 +36,7 @@
     .grid{display:grid; gap:16px; grid-template-columns: 1fr;}
     @media (min-width: 980px){ .grid{ grid-template-columns: 1.2fr .8fr; } }
 
-    .drop{
-      border:2px dashed rgba(31,41,55,.35); border-radius:var(--radius);
-      padding:18px; text-align:center; cursor:pointer; position:relative; transition:.2s border-color;
-    }
+    .drop{ border:2px dashed rgba(31,41,55,.35); border-radius:var(--radius); padding:18px; text-align:center; cursor:pointer; position:relative; transition:.2s border-color; }
     .drop.dragover{ border-color: var(--accent); }
     .drop input{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 
@@ -113,14 +110,24 @@
             <label for="colsRange">Columns (slider)</label>
             <input id="colsRange" type="range" min="1" max="64" value="1" />
           </div>
+
           <div class="field">
-            <label for="marginX">Margin X (px)</label>
-            <input id="marginX" type="number" min="0" value="0" />
+            <label for="marginTop">Top margin (px)</label>
+            <input id="marginTop" type="number" min="0" value="0" />
           </div>
           <div class="field">
-            <label for="marginY">Margin Y (px)</label>
-            <input id="marginY" type="number" min="0" value="0" />
+            <label for="marginRight">Right margin (px)</label>
+            <input id="marginRight" type="number" min="0" value="0" />
           </div>
+          <div class="field">
+            <label for="marginBottom">Bottom margin (px)</label>
+            <input id="marginBottom" type="number" min="0" value="0" />
+          </div>
+          <div class="field">
+            <label for="marginLeft">Left margin (px)</label>
+            <input id="marginLeft" type="number" min="0" value="0" />
+          </div>
+
           <div class="field" style="grid-column: span 2;">
             <label for="labelPrefix">File label prefix</label>
             <input id="labelPrefix" type="text" placeholder="sprite_" value="sprite_" />
@@ -149,8 +156,10 @@
       cols: document.getElementById('cols'),
       rowsRange: document.getElementById('rowsRange'),
       colsRange: document.getElementById('colsRange'),
-      marginX: document.getElementById('marginX'),
-      marginY: document.getElementById('marginY'),
+      marginTop: document.getElementById('marginTop'),
+      marginRight: document.getElementById('marginRight'),
+      marginBottom: document.getElementById('marginBottom'),
+      marginLeft: document.getElementById('marginLeft'),
       labelPrefix: document.getElementById('labelPrefix'),
       splitBtn: document.getElementById('splitBtn'),
       dlAllBtn: document.getElementById('dlAllBtn'),
@@ -205,23 +214,38 @@
     }
     link(els.rows, els.rowsRange); link(els.cols, els.colsRange);
 
-    ;['rows','cols','marginX','marginY'].forEach(k=>{
+    ;['rows','cols','marginTop','marginRight','marginBottom','marginLeft'].forEach(k=>{
       els[k].addEventListener('input', updateGrid);
     });
 
     function updateGrid(){
       const rows = Math.max(1, parseInt(els.rows.value||'1',10));
       const cols = Math.max(1, parseInt(els.cols.value||'1',10));
-      const mx = Math.max(0, parseInt(els.marginX.value||'0',10));
-      const my = Math.max(0, parseInt(els.marginY.value||'0',10));
+      const mt = Math.max(0, parseInt(els.marginTop.value||'0',10));
+      const mr = Math.max(0, parseInt(els.marginRight.value||'0',10));
+      const mb = Math.max(0, parseInt(els.marginBottom.value||'0',10));
+      const ml = Math.max(0, parseInt(els.marginLeft.value||'0',10));
+
       els.rows.value = rows; els.rowsRange.value = rows;
       els.cols.value = cols; els.colsRange.value = cols;
-      els.marginX.value = mx; els.marginY.value = my;
+      els.marginTop.value = mt; els.marginRight.value = mr; els.marginBottom.value = mb; els.marginLeft.value = ml;
       if(!img.naturalWidth) return;
 
       const w = img.naturalWidth, h = img.naturalHeight;
-      const usableW = Math.max(0, w - 2*mx);
-      const usableH = Math.max(0, h - 2*my);
+      const usableW = Math.max(0, w - ml - mr);
+      const usableH = Math.max(0, h - mt - mb);
+
+      // Guard: margins too large
+      if(usableW <= 0 || usableH <= 0){
+        els.cellInfo.innerHTML = `⚠️ Margins exceed image bounds. Reduce margins.`;
+        els.warn.style.display = 'block';
+        els.warn.textContent = `Top ${mt}px · Right ${mr}px · Bottom ${mb}px · Left ${ml}px — image is ${w}×${h}px.`;
+        const g = els.grid.getContext('2d'); g.clearRect(0,0,els.grid.width, els.grid.height);
+        els.splitBtn.disabled = true; return;
+      } else {
+        els.splitBtn.disabled = false;
+      }
+
       const cellW = Math.floor(usableW/cols);
       const cellH = Math.floor(usableH/rows);
       const remW = usableW - cellW*cols; 
@@ -235,38 +259,41 @@
         els.warn.style.display = 'none';
       }
 
-      // Draw grid overlay with margins
+      // Draw grid overlay with individual margins (TRBL)
       const g = els.grid.getContext('2d');
       g.clearRect(0,0,els.grid.width, els.grid.height);
-      g.strokeStyle = 'rgba(37,99,235,.7)';
+      g.strokeStyle = 'rgba(37,99,235,.8)';
       g.lineWidth = 1;
 
       // margin rectangle
       g.beginPath();
-      g.rect(mx + 0.5, my + 0.5, usableW - 1, usableH - 1);
+      g.rect(ml + 0.5, mt + 0.5, usableW - 1, usableH - 1);
       g.stroke();
 
       // vertical lines within margins
       for(let c=1; c<cols; c++){
-        const x = Math.round(mx + c*cellW) + 0.5; 
-        g.beginPath(); g.moveTo(x, my); g.lineTo(x, my + usableH); g.stroke();
+        const x = Math.round(ml + c*cellW) + 0.5; 
+        g.beginPath(); g.moveTo(x, mt); g.lineTo(x, mt + usableH); g.stroke();
       }
       // horizontal lines within margins
       for(let r=1; r<rows; r++){
-        const y = Math.round(my + r*cellH) + 0.5; 
-        g.beginPath(); g.moveTo(mx, y); g.lineTo(mx + usableW, y); g.stroke();
+        const y = Math.round(mt + r*cellH) + 0.5; 
+        g.beginPath(); g.moveTo(ml, y); g.lineTo(ml + usableW, y); g.stroke();
       }
     }
 
     function split(){
       if(!img.naturalWidth) return;
       const rows = parseInt(els.rows.value,10), cols = parseInt(els.cols.value,10);
-      const mx = Math.max(0, parseInt(els.marginX.value||'0',10));
-      const my = Math.max(0, parseInt(els.marginY.value||'0',10));
+      const mt = Math.max(0, parseInt(els.marginTop.value||'0',10));
+      const mr = Math.max(0, parseInt(els.marginRight.value||'0',10));
+      const mb = Math.max(0, parseInt(els.marginBottom.value||'0',10));
+      const ml = Math.max(0, parseInt(els.marginLeft.value||'0',10));
       const prefix = (els.labelPrefix.value || 'sprite_').trim();
       const w = img.naturalWidth, h = img.naturalHeight;
-      const usableW = Math.max(0, w - 2*mx);
-      const usableH = Math.max(0, h - 2*my);
+      const usableW = Math.max(0, w - ml - mr);
+      const usableH = Math.max(0, h - mt - mb);
+      if(usableW <= 0 || usableH <= 0) return;
       const cellW = Math.floor(usableW/cols), cellH = Math.floor(usableH/rows);
       const tiles = [];
       const work = document.createElement('canvas');
@@ -278,7 +305,7 @@
 
       for(let r=0; r<rows; r++){
         for(let c=0; c<cols; c++){
-          const sx = mx + c*cellW, sy = my + r*cellH;
+          const sx = ml + c*cellW, sy = mt + r*cellH;
           wctx.clearRect(0,0,cellW,cellH);
           wctx.drawImage(img, sx, sy, cellW, cellH, 0, 0, cellW, cellH);
           const dataURL = work.toDataURL('image/png');
