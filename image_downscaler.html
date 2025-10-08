@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bulk Image Downscaler</title>
+  <style>
+    :root { --bg:#0b1020; --card:#121832; --muted:#9fb0d0; --text:#e8eeff; --accent:#7aa2ff; }
+    html,body{height:100%}
+    body{margin:0;background:linear-gradient(135deg,var(--bg),#12152a);color:var(--text);font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Noto Sans", "Helvetica Neue", Arial}
+    .wrap{max-width:980px;margin:32px auto;padding:0 16px}
+    h1{font-weight:800;letter-spacing:.2px;margin:0 0 8px}
+    p.sub{margin:0 0 20px;color:var(--muted)}
+    .card{background:var(--card);border:1px solid #1b2447;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.25);padding:18px}
+    .grid{display:grid;gap:16px}
+    .grid.cols{grid-template-columns:1fr 1fr}
+    @media (max-width:860px){.grid.cols{grid-template-columns:1fr}}
+    label{display:block;font-weight:600;margin-bottom:6px}
+    input[type="number"], input[type="text"], input[type="file"], select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #24305f;background:#0e1430;color:var(--text)}
+    input[type="range"]{width:100%}
+    .row{display:flex;gap:10px;align-items:center}
+    .btn{cursor:pointer;display:inline-flex;align-items:center;gap:8px;background:var(--accent);color:#0b1020;padding:10px 14px;border-radius:12px;border:none;font-weight:700}
+    .btn.secondary{background:#1f2a55;color:var(--text);border:1px solid #2b3a78}
+    .btn:disabled{opacity:.5;cursor:not-allowed}
+    .muted{color:var(--muted)}
+    progress{width:100%;height:16px}
+    .thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+    .thumb{background:#0d1330;border:1px solid #223068;border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:6px}
+    .thumb img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px}
+    .pill{background:#1c274f;color:#cfe1ff;border-radius:999px;padding:2px 8px;font-size:12px}
+    footer{margin:22px 0 12px;color:#90a4d4}
+    .small{font-size:12px}
+    .spacer{height:8px}
+    code.kbd{background:#0e1430;border:1px solid #28356b;border-radius:6px;padding:2px 6px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Bulk Image Downscaler</h1>
+    <p class="sub">Load a folder of images → choose output size/format → save to an output folder or download a ZIP. Everything runs locally in your browser.</p>
+
+    <div class="card grid">
+      <div class="grid cols">
+        <div>
+          <label>1) Select input folder (images)</label>
+          <input id="inputDir" type="file" webkitdirectory multiple accept="image/*" />
+          <div class="spacer"></div>
+          <div class="row">
+            <button id="btnPickOut" class="btn secondary" title="Use the File System Access API to choose a destination folder (Chromium browsers)">Choose output folder</button>
+            <span id="outFolderName" class="muted small"></span>
+          </div>
+          <div class="spacer"></div>
+          <div class="grid cols">
+            <div>
+              <label>Max width (px)</label>
+              <input id="maxW" type="number" min="1" value="1920" />
+            </div>
+            <div>
+              <label>Max height (px)</label>
+              <input id="maxH" type="number" min="1" value="1080" />
+            </div>
+          </div>
+          <div class="grid cols">
+            <div>
+              <label>Output format</label>
+              <select id="format">
+                <option value="image/jpeg">JPEG (.jpg)</option>
+                <option value="image/webp">WebP (.webp)</option>
+                <option value="image/png">PNG (.png)</option>
+              </select>
+            </div>
+            <div>
+              <label>Quality (0.1–1, lossy)</label>
+              <input id="quality" type="range" min="0.1" max="1" step="0.05" value="0.8" />
+              <div class="row"><span class="muted small">Current: <span id="qVal">0.80</span></span></div>
+            </div>
+          </div>
+          <div class="grid cols">
+            <div>
+              <label>Filename suffix</label>
+              <input id="suffix" type="text" value="-small" />
+            </div>
+            <div>
+              <label>Skip if already smaller than target</label>
+              <select id="skipSmall">
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+          </div>
+          <div class="spacer"></div>
+          <div class="row">
+            <button id="btnStart" class="btn">Start downscaling</button>
+            <button id="btnZip" class="btn secondary" disabled>Download ZIP</button>
+          </div>
+          <div class="spacer"></div>
+          <progress id="prog" value="0" max="100"></progress>
+          <div class="row"><span id="status" class="muted small">Idle</span></div>
+        </div>
+
+        <div>
+          <label>Preview</label>
+          <div id="thumbs" class="thumbs"></div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="small">
+      Tip: Chrome/Edge let you save directly to a folder. On other browsers, use <b>Download ZIP</b>. Your images never leave your device.
+      <br/>Keyboard: press <code class="kbd">Enter</code> to start once files are selected.
+    </footer>
+  </div>
+
+  <!-- JSZip for ZIP fallback (small, CDN). If offline, the direct-folder save still works in Chromium browsers. -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+  <script>
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+    const inputDir = $('#inputDir');
+    const btnPickOut = $('#btnPickOut');
+    const outFolderName = $('#outFolderName');
+    const maxW = $('#maxW');
+    const maxH = $('#maxH');
+    const quality = $('#quality');
+    const qVal = $('#qVal');
+    const formatSel = $('#format');
+    const suffix = $('#suffix');
+    const skipSmall = $('#skipSmall');
+    const btnStart = $('#btnStart');
+    const btnZip = $('#btnZip');
+    const prog = $('#prog');
+    const status = $('#status');
+    const thumbs = $('#thumbs');
+
+    let outputDirHandle = null;
+    let files = [];
+    let resizedBlobs = []; // { name, blob }
+
+    quality.addEventListener('input', () => qVal.textContent = (+quality.value).toFixed(2));
+
+    inputDir.addEventListener('change', () => {
+      files = Array.from(inputDir.files).filter(f => f.type.startsWith('image/'));
+      thumbnails(files.slice(0, 30));
+      status.textContent = files.length ? `Loaded ${files.length} image(s).` : 'Idle';
+      btnZip.disabled = true;
+      resizedBlobs = [];
+      prog.value = 0;
+    });
+
+    async function pickOutputFolder(){
+      if (!window.showDirectoryPicker){
+        alert('Your browser does not support choosing an output folder. Use the ZIP download instead.');
+        return;
+      }
+      try{
+        outputDirHandle = await window.showDirectoryPicker({mode:'readwrite'});
+        outFolderName.textContent = `→ ${outputDirHandle.name}`;
+      }catch(e){
+        console.warn(e);
+      }
+    }
+
+    btnPickOut.addEventListener('click', pickOutputFolder);
+
+    function thumbnails(flist){
+      thumbs.innerHTML = '';
+      for (const f of flist){
+        const url = URL.createObjectURL(f);
+        const div = document.createElement('div');
+        div.className = 'thumb';
+        div.innerHTML = `<img src="${url}" alt="thumb"><div class="row"><span class="pill small">${Math.round(f.size/1024)} KB</span><span class="muted small">${f.name}</span></div>`;
+        thumbs.appendChild(div);
+        div.querySelector('img').onload = () => URL.revokeObjectURL(url);
+      }
+    }
+
+    async function loadImage(file){
+      const bitmap = await createImageBitmap(file);
+      const {width, height} = bitmap;
+      return {bitmap, width, height};
+    }
+
+    function calcTargetSize(w,h,maxW,maxH){
+      const scale = Math.min(maxW / w, maxH / h, 1); // never upscale
+      return {tw: Math.round(w * scale), th: Math.round(h * scale), scaled: scale < 1};
+    }
+
+    async function resizeBitmap(bitmap, tw, th, type, quality){
+      const canvas = document.createElement('canvas');
+      canvas.width = tw; canvas.height = th;
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(bitmap, 0, 0, tw, th);
+      return new Promise((resolve)=> canvas.toBlob(b=>resolve(b), type, type.includes('jpeg')||type.includes('webp') ? quality : undefined));
+    }
+
+    function swapExt(name, newExt){
+      const dot = name.lastIndexOf('.');
+      const base = dot>0 ? name.slice(0,dot) : name;
+      return base + newExt;
+    }
+
+    async function saveToFolder(name, blob){
+      if (!outputDirHandle) return false;
+      try{
+        const fileHandle = await outputDirHandle.getFileHandle(name, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return true;
+      }catch(e){ console.warn('save fail', e); return false; }
+    }
+
+    async function start(){
+      if (!files.length){ alert('Please select an input folder with images.'); return; }
+      btnStart.disabled = true; btnZip.disabled = true; status.textContent = 'Processing...';
+      resizedBlobs = [];
+      const maxw = Math.max(1, +maxW.value||1); const maxh = Math.max(1, +maxH.value||1);
+      const outType = formatSel.value; const q = +quality.value;
+
+      let processed = 0; let written = 0; let skipped = 0;
+      for (const f of files){
+        try{
+          const {bitmap, width, height} = await loadImage(f);
+          const {tw, th, scaled} = calcTargetSize(width, height, maxw, maxh);
+          if (skipSmall.value === 'yes' && !scaled){
+            skipped++; processed++;
+            prog.value = (processed / files.length) * 100;
+            status.textContent = `Skipped ${skipped} (already small). ${processed}/${files.length}`;
+            continue;
+          }
+          const blob = await resizeBitmap(bitmap, tw, th, outType, q);
+          const ext = outType === 'image/jpeg' ? '.jpg' : outType === 'image/png' ? '.png' : '.webp';
+          const outName = swapExt(f.name, '') + suffix.value + ext;
+          let saved = false;
+          if (outputDirHandle){ saved = await saveToFolder(outName, blob); if (saved) written++; }
+          if (!saved){ resizedBlobs.push({ name: outName, blob }); }
+          processed++;
+          prog.value = (processed / files.length) * 100;
+          status.textContent = `Processed ${processed}/${files.length} • Saved ${written}${outputDirHandle?' to folder':''}${resizedBlobs.length?` • Pending in ZIP: ${resizedBlobs.length}`:''}`;
+        }catch(e){ console.error(e); processed++; }
+      }
+      btnStart.disabled = false;
+      btnZip.disabled = resizedBlobs.length === 0;
+      if (outputDirHandle && resizedBlobs.length===0){ status.textContent += ' • Done ✅'; }
+      else{ status.textContent += ' • You can download the ZIP ✅'; }
+    }
+
+    async function downloadZip(){
+      if (!resizedBlobs.length){ alert('Nothing to zip.'); return; }
+      const zip = new JSZip();
+      for (const item of resizedBlobs){ zip.file(item.name, item.blob); }
+      status.textContent = 'Zipping...';
+      const blob = await zip.generateAsync({type:'blob'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'downscaled_images.zip';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+      status.textContent = 'ZIP downloaded. ✅';
+    }
+
+    btnStart.addEventListener('click', start);
+    btnZip.addEventListener('click', downloadZip);
+    document.addEventListener('keydown', (e)=>{ if (e.key==='Enter' && files.length) start(); });
+  </script>
+</body>
+</html>
