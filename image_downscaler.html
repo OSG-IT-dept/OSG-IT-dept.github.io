@@ -136,7 +136,9 @@
 
     let outputDirHandle = null;
     let files = [];
-    let resizedBlobs = []; // { name, blob }
+    let resizedBlobs = []; // { name, blob, zipPath }
+    let zipNameCounts = new Map();
+    let saveNameCounts = new Map();
 
     quality.addEventListener('input', () => qVal.textContent = (+quality.value).toFixed(2));
 
@@ -146,6 +148,8 @@
       status.textContent = files.length ? `Loaded ${files.length} image(s).` : 'Idle';
       btnZip.disabled = true;
       resizedBlobs = [];
+      zipNameCounts = new Map();
+      saveNameCounts = new Map();
       prog.value = 0;
     });
 
@@ -203,10 +207,32 @@
       return base + newExt;
     }
 
-    async function saveToFolder(name, blob){
+    async function ensureDir(path){
+      // Create nested directories under the chosen output folder
+      let dirHandle = outputDirHandle;
+      const parts = path.split('/').filter(Boolean);
+      // Exclude last part if it's a file
+      for (const part of parts){
+        dirHandle = await dirHandle.getDirectoryHandle(part, { create: true });
+      }
+      return dirHandle;
+    }
+
+    async function saveToFolderWithPath(zipPath, blob){
       if (!outputDirHandle) return false;
       try{
-        const fileHandle = await outputDirHandle.getFileHandle(name, { create: true });
+        const lastSlash = zipPath.lastIndexOf('/')
+        const dirPath = lastSlash > -1 ? zipPath.slice(0,lastSlash) : '';
+        const fileName = lastSlash > -1 ? zipPath.slice(lastSlash+1) : zipPath;
+        let targetDir = outputDirHandle;
+        if (dirPath){ targetDir = await ensureDir(dirPath); }
+        const fileHandle = await targetDir.getFileHandle(fileName, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return true;
+      }catch(e){ console.warn('save fail', e); return false; }
+    });
         const writable = await fileHandle.createWritable();
         await writable.write(blob);
         await writable.close();
@@ -216,6 +242,74 @@
 
     async function start(){
       if (!files.length){ alert('Please select an input folder with images.'); return; }
+      btnStart.disabled = true; btnZip.disabled = true; status.textContent = 'Processing...';
+      resizedBlobs = []; zipNameCounts = new Map(); saveNameCounts = new Map();
+      const maxw = Math.max(1, +maxW.value||1); const maxh = Math.max(1, +maxH.value||1);
+      const outType = formatSel.value; const q = +quality.value;
+
+      const extFromType = (t)=> t === 'image/jpeg' ? '.jpg' : t === 'image/png' ? '.png' : '.webp';
+      const addIndexBeforeExt = (name, idx)=>{
+        const dot = name.lastIndexOf('.');
+        const base = dot>0 ? name.slice(0,dot) : name;
+        const ext = dot>0 ? name.slice(dot) : '';
+        return `${base} (${idx})${ext}`;
+      };
+      const uniquePath = (path, map)=>{
+        let key = path.toLowerCase();
+        if (!map.has(key)){ map.set(key, 1); return path; }
+        let i = map.get(key) + 1;
+        let candidate = path;
+        do {
+          // add index before extension on the filename part
+          const slash = path.lastIndexOf('/');
+          const dir = slash>-1 ? path.slice(0,slash+1) : '';
+          const file = slash>-1 ? path.slice(slash+1) : path;
+          candidate = dir + addIndexBeforeExt(file, i);
+          key = candidate.toLowerCase();
+          i++;
+        } while (map.has(key));
+        map.set(key, i-1);
+        return candidate;
+      };
+
+      let processed = 0; let written = 0; let skipped = 0;
+      for (const f of files){
+        try{
+          const {bitmap, width, height} = await loadImage(f);
+          const {tw, th, scaled} = calcTargetSize(width, height, maxw, maxh);
+          if (skipSmall.value === 'yes' && !scaled){
+            skipped++; processed++;
+            prog.value = (processed / files.length) * 100;
+            status.textContent = `Skipped ${skipped} (already small). ${processed}/${files.length}`;
+            continue;
+          }
+          const blob = await resizeBitmap(bitmap, tw, th, outType, q);
+          const ext = extFromType(outType);
+
+          // Build relative path (preserve subfolders when provided by webkitdirectory)
+          const rel = f.webkitRelativePath && f.webkitRelativePath.length ? f.webkitRelativePath : f.name;
+          const slash = rel.lastIndexOf('/');
+          const dir = slash>-1 ? rel.slice(0, slash+1) : '';
+          const fname = slash>-1 ? rel.slice(slash+1) : rel;
+          const base = fname.includes('.') ? fname.slice(0, fname.lastIndexOf('.')) : fname;
+
+          const outName = base + suffix.value + ext; // file name only
+          let zipPath = dir + outName;               // include directory in zip
+          zipPath = uniquePath(zipPath, zipNameCounts);
+
+          let saved = false;
+          if (outputDirHandle){ saved = await saveToFolderWithPath(zipPath, blob); if (saved) written++; }
+          if (!saved){ resizedBlobs.push({ name: outName, blob, zipPath }); }
+          processed++;
+          prog.value = (processed / files.length) * 100;
+          status.textContent = `Processed ${processed}/${files.length} • Saved ${written}${outputDirHandle?' to folder':''}${resizedBlobs.length?` • Pending in ZIP: ${resizedBlobs.length}`:''}`;
+        }catch(e){ console.error(e); processed++; }
+      }
+      btnStart.disabled = false;
+      btnZip.disabled = resizedBlobs.length === 0;
+      if (outputDirHandle && resizedBlobs.length===0){ status.textContent += ' • Done ✅'; }
+      else{ status.textContent += ' • You can download the ZIP ✅'; }
+    }
       btnStart.disabled = true; btnZip.disabled = true; status.textContent = 'Processing...';
       resizedBlobs = [];
       const maxw = Math.max(1, +maxW.value||1); const maxh = Math.max(1, +maxH.value||1);
@@ -251,6 +345,20 @@
 
     async function downloadZip(){
       if (!resizedBlobs.length){ alert('Nothing to zip.'); return; }
+      const zip = new JSZip();
+      for (const item of resizedBlobs){
+        // Use zipPath to avoid overwriting files with same names from different subfolders
+        zip.file(item.zipPath || item.name, item.blob);
+      }
+      status.textContent = 'Zipping...';
+      const blob = await zip.generateAsync({type:'blob'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'downscaled_images.zip';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+      status.textContent = 'ZIP downloaded. ✅';
+    }
       const zip = new JSZip();
       for (const item of resizedBlobs){ zip.file(item.name, item.blob); }
       status.textContent = 'Zipping...';
