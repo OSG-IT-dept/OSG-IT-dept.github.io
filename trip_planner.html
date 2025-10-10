@@ -1,442 +1,426 @@
-import React, { useMemo, useState } from "react";
-import { MapContainer, TileLayer, Marker, Polyline, useMapEvents } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
-import { format } from "date-fns";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CalendarClock, Car, Download, FileJson, Map as MapIcon, Plus, Route as RouteIcon, Trash, Upload, Wand2, ArrowUp, ArrowDown, Ship, Plane } from "lucide-react";
-
-// --- Helpers
-const km = (m) => m / 1000;
-const R = 6371000; // meters
-function haversine(a, b) {
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const lat1 = toRad(a.lat);
-  const lat2 = toRad(b.lat);
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h)); // meters
-}
-
-const speeds = {
-  car: 80, // km/h
-  ferry: 25,
-  flight: 700,
-  walk: 5,
-};
-
-function estimateLegTimeKm(distanceKm, mode) {
-  const v = speeds[mode] ?? 60;
-  return distanceKm / v; // hours
-}
-
-const defaultCenter = { lat: 40.4168, lng: -3.7038 }; // Madrid
-
-const pinIcon = (n) =>
-  new L.DivIcon({
-    className: "rounded-full bg-primary text-primary-foreground border border-primary shadow px-2 py-1 text-xs font-semibold",
-    html: String(n),
-    iconAnchor: [10, 10],
-  });
-
-function ClickToAdd({ onAdd }) {
-  useMapEvents({
-    click(e) {
-      onAdd({ lat: e.latlng.lat, lng: e.latlng.lng });
-    },
-  });
-  return null;
-}
-
-export default function TripPlanner() {
-  const [meta, setMeta] = useState({
-    planName: "New Trip Plan",
-    refOSG: "",
-    client: "",
-    vessel: "",
-    operator: "",
-    startDate: "",
-    notes: "",
-    defaultMode: "car",
-  });
-
-  const [stops, setStops] = useState([
-    // Example
-    // { name: "Office", lat: 40.4168, lng: -3.7038, windowStart: "", windowEnd: "", dwellHours: 1, mode: "car", notes: "" }
-  ]);
-
-  const addStop = (pt, preset = {}) => {
-    setStops((s) => [
-      ...s,
-      {
-        name: preset.name ?? `Stop ${s.length + 1}`,
-        lat: pt?.lat ?? defaultCenter.lat,
-        lng: pt?.lng ?? defaultCenter.lng,
-        windowStart: "",
-        windowEnd: "",
-        dwellHours: 1,
-        mode: meta.defaultMode,
-        notes: "",
-        contact: "",
-        address: "",
-      },
-    ]);
-  };
-
-  const removeStop = (idx) => setStops((s) => s.filter((_, i) => i !== idx));
-
-  const moveStop = (idx, dir) => {
-    setStops((s) => {
-      const arr = [...s];
-      const j = idx + dir;
-      if (j < 0 || j >= arr.length) return s;
-      const [it] = arr.splice(idx, 1);
-      arr.splice(j, 0, it);
-      return arr;
-    });
-  };
-
-  const updateStop = (idx, patch) => setStops((s) => s.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
-
-  const route = useMemo(() => {
-    if (stops.length < 2) return { legs: [], totalKm: 0, travelHours: 0, totalHours: 0 };
-    const legs = [];
-    let travelHours = 0;
-    let totalKm = 0;
-    for (let i = 0; i < stops.length - 1; i++) {
-      const a = stops[i];
-      const b = stops[i + 1];
-      const d = km(haversine(a, b));
-      const mode = a.mode || meta.defaultMode;
-      const h = estimateLegTimeKm(d, mode);
-      totalKm += d;
-      travelHours += h;
-      legs.push({ from: i, to: i + 1, km: d, hours: h, mode });
-    }
-    const dwell = stops.reduce((acc, s) => acc + Number(s.dwellHours || 0), 0);
-    return { legs, totalKm, travelHours, totalHours: travelHours + dwell };
-  }, [stops, meta.defaultMode]);
-
-  const optimize = () => {
-    // Greedy nearest-neighbor on current set (keeps first stop fixed)
-    if (stops.length < 3) return;
-    const remaining = stops.slice(1);
-    const ordered = [stops[0]];
-    let cursor = stops[0];
-    while (remaining.length) {
-      let bestIdx = 0;
-      let bestDist = Infinity;
-      for (let i = 0; i < remaining.length; i++) {
-        const d = haversine(cursor, remaining[i]);
-        if (d < bestDist) {
-          bestDist = d;
-          bestIdx = i;
-        }
-      }
-      const [next] = remaining.splice(bestIdx, 1);
-      ordered.push(next);
-      cursor = next;
-    }
-    setStops(ordered);
-  };
-
-  const exportCSV = () => {
-    const headers = [
-      "Order",
-      "Name",
-      "Address",
-      "Lat",
-      "Lng",
-      "Contact",
-      "WindowStart",
-      "WindowEnd",
-      "DwellHours",
-      "Mode",
-      "Notes",
-    ];
-    const rows = stops.map((s, i) => [
-      i + 1,
-      s.name,
-      s.address ?? "",
-      s.lat,
-      s.lng,
-      s.contact ?? "",
-      s.windowStart ?? "",
-      s.windowEnd ?? "",
-      s.dwellHours ?? 0,
-      s.mode ?? meta.defaultMode,
-      (s.notes ?? "").replaceAll("\n", " "),
-    ]);
-    const csv = [headers, ...rows].map((r) => r.map((v) => `"${String(v).replaceAll('"', '""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${meta.planName || "trip"}-itinerary.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const exportJSON = () => {
-    const payload = { meta, stops, route, generatedAt: new Date().toISOString() };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${meta.planName || "trip"}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const importJSON = (file) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const data = JSON.parse(reader.result);
-        if (data.meta) setMeta((m) => ({ ...m, ...data.meta }));
-        if (Array.isArray(data.stops)) setStops(data.stops);
-      } catch (e) {
-        alert("Invalid JSON file");
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  return (
-    <div className="w-full min-h-screen bg-gradient-to-b from-background to-muted/30 p-4 md:p-6 lg:p-10">
-      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: Plan form */}
-        <div className="space-y-4 lg:col-span-1">
-          <Card className="shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-xl"><RouteIcon className="w-5 h-5"/> Surveyor Trip Planner</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid grid-cols-1 gap-3">
-                <div>
-                  <Label>Plan name</Label>
-                  <Input value={meta.planName} onChange={(e) => setMeta({ ...meta, planName: e.target.value })} />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>REF_OSG (Work Order)</Label>
-                    <Input placeholder="e.g. OSG-2025-1042" value={meta.refOSG} onChange={(e) => setMeta({ ...meta, refOSG: e.target.value })} />
-                  </div>
-                  <div>
-                    <Label>Start date</Label>
-                    <Input type="datetime-local" value={meta.startDate} onChange={(e) => setMeta({ ...meta, startDate: e.target.value })} />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Client</Label>
-                    <Input value={meta.client} onChange={(e) => setMeta({ ...meta, client: e.target.value })} />
-                  </div>
-                  <div>
-                    <Label>Vessel</Label>
-                    <Input value={meta.vessel} onChange={(e) => setMeta({ ...meta, vessel: e.target.value })} />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Operator / Agency</Label>
-                    <Input value={meta.operator} onChange={(e) => setMeta({ ...meta, operator: e.target.value })} />
-                  </div>
-                  <div>
-                    <Label className="flex items-center gap-2">Default travel mode</Label>
-                    <Select value={meta.defaultMode} onValueChange={(v) => setMeta({ ...meta, defaultMode: v })}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="car"><div className="flex items-center gap-2"><Car className="w-4 h-4"/>Car</div></SelectItem>
-                        <SelectItem value="ferry"><div className="flex items-center gap-2"><Ship className="w-4 h-4"/>Ferry</div></SelectItem>
-                        <SelectItem value="flight"><div className="flex items-center gap-2"><Plane className="w-4 h-4"/>Flight</div></SelectItem>
-                        <SelectItem value="walk">Walk</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div>
-                  <Label>General notes</Label>
-                  <Textarea rows={3} placeholder="Lodging, permits, PPE, parking, site access, etc." value={meta.notes} onChange={(e) => setMeta({ ...meta, notes: e.target.value })} />
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2 pt-2">
-                <Button onClick={() => addStop()}><Plus className="w-4 h-4 mr-2"/>Add stop</Button>
-                <Button variant="secondary" onClick={optimize}><Wand2 className="w-4 h-4 mr-2"/>Optimize order</Button>
-                <label className="inline-flex items-center gap-2 cursor-pointer">
-                  <Input type="file" accept="application/json" className="hidden" onChange={(e) => e.target.files?.[0] && importJSON(e.target.files[0])}/>
-                  <span className="inline-flex items-center rounded-md border px-3 py-2 text-sm font-medium"><Upload className="w-4 h-4 mr-2"/>Import JSON</span>
-                </label>
-                <Button variant="outline" onClick={exportCSV}><Download className="w-4 h-4 mr-2"/>Export CSV</Button>
-                <Button variant="outline" onClick={exportJSON}><FileJson className="w-4 h-4 mr-2"/>Export JSON</Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-sm">
-            <CardHeader className="pb-2"><CardTitle className="text-base flex items-center gap-2"><CalendarClock className="w-5 h-5"/> Stops & Time Windows</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              {stops.length === 0 && (
-                <p className="text-muted-foreground text-sm">Add stops from the map (click) or with the button above.</p>
-              )}
-              {stops.map((s, idx) => (
-                <div key={idx} className="rounded-2xl border p-3 shadow-sm bg-card/60">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="font-medium">#{idx + 1} — {s.name}</div>
-                    <div className="flex items-center gap-1">
-                      <Button size="icon" variant="ghost" onClick={() => moveStop(idx, -1)} disabled={idx === 0}><ArrowUp className="w-4 h-4"/></Button>
-                      <Button size="icon" variant="ghost" onClick={() => moveStop(idx, +1)} disabled={idx === stops.length - 1}><ArrowDown className="w-4 h-4"/></Button>
-                      <Button size="icon" variant="ghost" onClick={() => removeStop(idx)}><Trash className="w-4 h-4"/></Button>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <Label>Name</Label>
-                      <Input value={s.name} onChange={(e) => updateStop(idx, { name: e.target.value })} />
-                    </div>
-                    <div>
-                      <Label>Address / Place</Label>
-                      <Input value={s.address || ""} onChange={(e) => updateStop(idx, { address: e.target.value })} placeholder="Optional free text" />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <Label>Lat</Label>
-                        <Input type="number" step="0.000001" value={s.lat} onChange={(e) => updateStop(idx, { lat: parseFloat(e.target.value) })} />
-                      </div>
-                      <div>
-                        <Label>Lng</Label>
-                        <Input type="number" step="0.000001" value={s.lng} onChange={(e) => updateStop(idx, { lng: parseFloat(e.target.value) })} />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <Label>Window start</Label>
-                        <Input type="datetime-local" value={s.windowStart} onChange={(e) => updateStop(idx, { windowStart: e.target.value })} />
-                      </div>
-                      <div>
-                        <Label>Window end</Label>
-                        <Input type="datetime-local" value={s.windowEnd} onChange={(e) => updateStop(idx, { windowEnd: e.target.value })} />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <Label>Dwell (hrs)</Label>
-                        <Input type="number" min="0" step="0.25" value={s.dwellHours} onChange={(e) => updateStop(idx, { dwellHours: parseFloat(e.target.value) })} />
-                      </div>
-                      <div>
-                        <Label>Leg mode</Label>
-                        <Select value={s.mode} onValueChange={(v) => updateStop(idx, { mode: v })}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="car">Car</SelectItem>
-                            <SelectItem value="ferry">Ferry</SelectItem>
-                            <SelectItem value="flight">Flight</SelectItem>
-                            <SelectItem value="walk">Walk</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <div>
-                      <Label>Contact</Label>
-                      <Input value={s.contact || ""} onChange={(e) => updateStop(idx, { contact: e.target.value })} placeholder="Name / phone / email" />
-                    </div>
-                    <div className="md:col-span-2">
-                      <Label>Notes</Label>
-                      <Textarea rows={2} value={s.notes} onChange={(e) => updateStop(idx, { notes: e.target.value })} />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Surveyor Trip Planner (HTML Only)</title>
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <style>
+    :root { --bg:#0b1020; --card:#111832; --muted:#0e1530; --text:#e7ecff; --sub:#a8b3d0; --accent:#7aa2ff; --border:#263056; --good:#42d392; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, "Helvetica Neue", Arial; color:var(--text); background:linear-gradient(180deg,#0b1020,#0d1230 40%, #0a1026); }
+    .wrap { max-width:1280px; margin:0 auto; padding:16px; display:grid; grid-template-columns: 380px 1fr; gap:16px; }
+    @media (max-width: 980px){ .wrap{ grid-template-columns:1fr; } }
+    .card { background:linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01)); border:1px solid var(--border); border-radius:16px; box-shadow:0 10px 24px rgba(0,0,0,.25); overflow:hidden; }
+    .card h2 { margin:0; padding:14px 16px; font-size:16px; border-bottom:1px solid var(--border); background:rgba(122,162,255,0.08); }
+    .card .content { padding:14px 16px; }
+    label { display:block; font-size:12px; color:var(--sub); margin-bottom:6px; }
+    input, select, textarea { width:100%; background:#0f1733; color:var(--text); border:1px solid var(--border); border-radius:10px; padding:10px 12px; font-size:14px; }
+    textarea { resize:vertical; }
+    .row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .btns { display:flex; flex-wrap:wrap; gap:8px; }
+    button, .btn { background:#15214a; color:var(--text); border:1px solid var(--border); padding:8px 12px; border-radius:10px; cursor:pointer; font-weight:600; }
+    button:hover, .btn:hover { background:#1a2a60; }
+    button.outline { background:transparent; }
+    small.tip { color:var(--sub); display:block; margin-top:6px; }
+    .stop { border:1px solid var(--border); border-radius:14px; padding:10px; margin-bottom:10px; background:rgba(255,255,255,0.02); }
+    .stop .head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; font-weight:600; }
+    .iconbtn { background:transparent; border:0; color:var(--sub); padding:6px; cursor:pointer; }
+    .iconbtn:disabled { opacity:.4; cursor:not-allowed; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th, td { padding:8px 6px; border-bottom:1px solid var(--border); text-align:left; }
+    .kpis { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:10px; }
+    @media (max-width: 640px){ .kpis{ grid-template-columns: repeat(2, minmax(0,1fr)); } }
+    .kpi { text-align:center; border:1px solid var(--border); border-radius:14px; padding:10px; }
+    .kpi .lab { font-size:12px; color:var(--sub); }
+    .kpi .val { font-size:18px; font-weight:700; margin-top:4px; }
+    #map { height:460px; width:100%; }
+    .marker-num { background:var(--accent); color:#06122b; border:2px solid white; border-radius:999px; width:24px; height:24px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:12px; box-shadow:0 2px 8px rgba(0,0,0,.5); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- LEFT: Form -->
+    <div class="card">
+      <h2>Surveyor Trip Planner</h2>
+      <div class="content">
+        <div class="row">
+          <div>
+            <label>Plan name</label>
+            <input id="planName" placeholder="New Trip Plan" />
+          </div>
+          <div>
+            <label>Start date</label>
+            <input id="startDate" type="datetime-local" />
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>REF_OSG (Work Order)</label>
+            <input id="refOSG" placeholder="OSG-2025-1042" />
+          </div>
+          <div>
+            <label>Default travel mode</label>
+            <select id="defaultMode">
+              <option value="car">Car</option>
+              <option value="ferry">Ferry</option>
+              <option value="flight">Flight</option>
+              <option value="walk">Walk</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Client</label>
+            <input id="client" />
+          </div>
+          <div>
+            <label>Vessel</label>
+            <input id="vessel" />
+          </div>
+        </div>
+        <div>
+          <label>Operator / Agency</label>
+          <input id="operator" />
+        </div>
+        <div>
+          <label>General notes</label>
+          <textarea id="notes" rows="3" placeholder="Lodging, permits, PPE, parking, site access, etc."></textarea>
         </div>
 
-        {/* Right: Map & Summary */}
-        <div className="space-y-4 lg:col-span-2">
-          <Card className="overflow-hidden shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2"><MapIcon className="w-5 h-5"/> Map & Route</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[460px] w-full rounded-2xl overflow-hidden">
-                <MapContainer center={[defaultCenter.lat, defaultCenter.lng]} zoom={5} className="h-full w-full">
-                  <TileLayer
-                    attribution='&copy; OpenStreetMap contributors'
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  />
-                  <ClickToAdd onAdd={(pt) => addStop(pt)} />
-                  {stops.map((s, i) => (
-                    <Marker key={i} position={[s.lat, s.lng]} icon={pinIcon(i + 1)} />
-                  ))}
-                  {stops.length > 1 && (
-                    <Polyline positions={stops.map((s) => [s.lat, s.lng])} />
-                  )}
-                </MapContainer>
-              </div>
-              <p className="text-xs text-muted-foreground mt-2">Tip: click anywhere on the map to add a stop; then edit the details on the left.</p>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-sm">
-            <CardHeader className="pb-2"><CardTitle className="text-base">Route Summary</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <SummaryTile label="Total distance" value={`${route.totalKm.toFixed(1)} km`} />
-                <SummaryTile label="Travel time" value={`${route.travelHours.toFixed(1)} h`} />
-                <SummaryTile label="Dwell time" value={`${(stops.reduce((a, s) => a + Number(s.dwellHours || 0), 0)).toFixed(1)} h`} />
-                <SummaryTile label="Total time" value={`${route.totalHours.toFixed(1)} h`} />
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left border-b">
-                      <th className="py-2 pr-2">Leg</th>
-                      <th className="py-2 pr-2">From → To</th>
-                      <th className="py-2 pr-2">Mode</th>
-                      <th className="py-2 pr-2">Dist (km)</th>
-                      <th className="py-2 pr-2">ETA (h)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {route.legs.map((leg, i) => (
-                      <tr key={i} className="border-b last:border-0">
-                        <td className="py-2 pr-2">{i + 1}</td>
-                        <td className="py-2 pr-2">#{leg.from + 1} {stops[leg.from]?.name || ""} → #{leg.to + 1} {stops[leg.to]?.name || ""}</td>
-                        <td className="py-2 pr-2 capitalize">{leg.mode}</td>
-                        <td className="py-2 pr-2">{leg.km.toFixed(1)}</td>
-                        <td className="py-2 pr-2">{leg.hours.toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {meta.startDate && (
-                <div className="text-xs text-muted-foreground">
-                  <span className="font-medium">Planned start:</span> {format(new Date(meta.startDate), "PPpp")} — <span className="font-medium">Projected finish:</span> {format(new Date(new Date(meta.startDate).getTime() + route.totalHours * 3600 * 1000), "PPpp")}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+        <div class="btns" style="margin-top:10px;">
+          <button id="btnAdd">Add stop</button>
+          <button id="btnOptimize">Optimize order</button>
+          <label class="btn" style="display:inline-flex; align-items:center; gap:8px;">
+            <input id="importJSON" type="file" accept="application/json" style="display:none" />
+            Import JSON
+          </label>
+          <button id="btnExportCSV" class="outline">Export CSV</button>
+          <button id="btnExportJSON" class="outline">Export JSON</button>
         </div>
       </div>
     </div>
-  );
-}
 
-function SummaryTile({ label, value }) {
-  return (
-    <div className="rounded-2xl border p-3 text-center">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="text-lg font-semibold">{value}</div>
+    <!-- RIGHT: Map -->
+    <div class="card">
+      <h2>Map & Route</h2>
+      <div class="content">
+        <div id="map"></div>
+        <small class="tip">Tip: click anywhere on the map to add a stop; then edit the details below.</small>
+      </div>
     </div>
-  );
-}
+
+    <!-- LEFT (second row): Stops -->
+    <div class="card">
+      <h2>Stops & Time Windows</h2>
+      <div class="content" id="stops"></div>
+    </div>
+
+    <!-- RIGHT (second row): Summary -->
+    <div class="card">
+      <h2>Route Summary</h2>
+      <div class="content">
+        <div class="kpis" id="kpis"></div>
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Leg</th>
+                <th>From → To</th>
+                <th>Mode</th>
+                <th>Dist (km)</th>
+                <th>ETA (h)</th>
+              </tr>
+            </thead>
+            <tbody id="legs"></tbody>
+          </table>
+        </div>
+        <div id="timing" style="margin-top:10px; color:var(--sub);"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ---------- Helpers ----------
+    const R = 6371000; // m
+    const km = m => m/1000;
+    const speeds = { car:80, ferry:25, flight:700, walk:5 };
+    function haversine(a,b){
+      const toRad = d => d*Math.PI/180;
+      const dLat = toRad(b.lat - a.lat);
+      const dLng = toRad(b.lng - a.lng);
+      const lat1 = toRad(a.lat); const lat2 = toRad(b.lat);
+      const h = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;
+      return 2*R*Math.asin(Math.sqrt(h));
+    }
+    function estHours(distanceKm, mode){ return distanceKm / (speeds[mode] ?? 60); }
+    function fmt(n, d=1){ return Number(n).toFixed(d); }
+    function download(filename, text){
+      const blob = new Blob([text], {type: filename.endsWith('.json')? 'application/json' : 'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url);
+    }
+
+    // ---------- State ----------
+    const meta = {
+      planName: 'New Trip Plan', refOSG: '', client:'', vessel:'', operator:'', startDate:'', notes:'', defaultMode:'car'
+    };
+    let stops = [];
+    let map, markers = [], line;
+
+    // ---------- UI Elements ----------
+    const el = id => document.getElementById(id);
+    const inputs = {
+      planName: el('planName'), refOSG: el('refOSG'), client: el('client'), vessel: el('vessel'), operator: el('operator'), startDate: el('startDate'), notes: el('notes'), defaultMode: el('defaultMode')
+    };
+
+    Object.entries(inputs).forEach(([k, node]) => {
+      node.addEventListener('input', () => { meta[k] = node.value; renderAll(); });
+      node.addEventListener('change', () => { meta[k] = node.value; renderAll(); });
+    });
+
+    // ---------- Map ----------
+    const defaultCenter = { lat: 40.4168, lng: -3.7038 }; // Madrid
+    map = L.map('map').setView([defaultCenter.lat, defaultCenter.lng], 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'&copy; OpenStreetMap contributors' }).addTo(map);
+    map.on('click', (e) => addStop({ lat:e.latlng.lat, lng:e.latlng.lng }));
+
+    function markerIcon(n){
+      return L.divIcon({ className:'', html:`<div class="marker-num">${n}</div>`, iconSize:[24,24], iconAnchor:[12,12] });
+    }
+
+    function refreshMap(){
+      markers.forEach(m => m.remove()); markers = [];
+      if(line){ line.remove(); line = null; }
+      stops.forEach((s, i) => {
+        const m = L.marker([s.lat, s.lng], { icon: markerIcon(i+1) }).addTo(map);
+        markers.push(m);
+      });
+      if(stops.length>1){
+        line = L.polyline(stops.map(s=>[s.lat, s.lng])).addTo(map);
+        const b = L.latLngBounds(stops.map(s=>[s.lat, s.lng]));
+        map.fitBounds(b.pad(0.2));
+      }
+    }
+
+    // ---------- Stops CRUD ----------
+    function addStop(pt, preset={}){
+      stops.push({
+        name: preset.name || `Stop ${stops.length+1}`,
+        lat: pt?.lat ?? defaultCenter.lat,
+        lng: pt?.lng ?? defaultCenter.lng,
+        address: preset.address || '',
+        windowStart: '', windowEnd: '',
+        dwellHours: 1,
+        mode: meta.defaultMode,
+        contact: '',
+        notes: ''
+      });
+      renderAll();
+    }
+    function removeStop(idx){ stops.splice(idx,1); renderAll(); }
+    function moveStop(idx, dir){ const j=idx+dir; if(j<0||j>=stops.length) return; const [it]=stops.splice(idx,1); stops.splice(j,0,it); renderAll(); }
+
+    // ---------- Compute route ----------
+    function computeRoute(){
+      if(stops.length<2) return { legs:[], totalKm:0, travelHours:0, totalHours: (stops.reduce((a,s)=>a+Number(s.dwellHours||0),0)) };
+      const legs=[]; let totalKm=0, travelHours=0;
+      for(let i=0;i<stops.length-1;i++){
+        const a=stops[i], b=stops[i+1];
+        const dkm = km(haversine(a,b));
+        const mode = a.mode || meta.defaultMode;
+        const h = estHours(dkm, mode);
+        legs.push({from:i, to:i+1, km:dkm, hours:h, mode});
+        totalKm+=dkm; travelHours+=h;
+      }
+      const dwell = stops.reduce((a,s)=>a+Number(s.dwellHours||0),0);
+      return { legs, totalKm, travelHours, totalHours: travelHours + dwell };
+    }
+
+    function optimize(){
+      if(stops.length<3) return;
+      const remaining = stops.slice(1);
+      const ordered=[stops[0]]; let cursor=stops[0];
+      while(remaining.length){
+        let best=0, bestD=Infinity;
+        for(let i=0;i<remaining.length;i++){
+          const d=haversine(cursor, remaining[i]);
+          if(d<bestD){ bestD=d; best=i; }
+        }
+        const next = remaining.splice(best,1)[0];
+        ordered.push(next); cursor=next;
+      }
+      stops = ordered; renderAll();
+    }
+
+    // ---------- Renderers ----------
+    function renderStops(){
+      const host = document.getElementById('stops');
+      host.innerHTML='';
+      if(stops.length===0){ host.innerHTML = '<small class="tip">No stops yet. Add one on the map or with the button above.</small>'; return; }
+      stops.forEach((s, idx)=>{
+        const div = document.createElement('div'); div.className='stop';
+        div.innerHTML = `
+          <div class="head">
+            <div>#${idx+1} — <span>${s.name || ''}</span></div>
+            <div>
+              <button class="iconbtn" data-act="up">▲</button>
+              <button class="iconbtn" data-act="down">▼</button>
+              <button class="iconbtn" data-act="del">🗑</button>
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label>Name</label>
+              <input data-k="name" value="${escapeHtml(s.name)}" />
+            </div>
+            <div>
+              <label>Address / Place</label>
+              <input data-k="address" value="${escapeHtml(s.address||'')}" placeholder="Optional" />
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label>Lat</label>
+              <input data-k="lat" type="number" step="0.000001" value="${s.lat}" />
+            </div>
+            <div>
+              <label>Lng</label>
+              <input data-k="lng" type="number" step="0.000001" value="${s.lng}" />
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label>Window start</label>
+              <input data-k="windowStart" type="datetime-local" value="${s.windowStart||''}" />
+            </div>
+            <div>
+              <label>Window end</label>
+              <input data-k="windowEnd" type="datetime-local" value="${s.windowEnd||''}" />
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label>Dwell (hrs)</label>
+              <input data-k="dwellHours" type="number" min="0" step="0.25" value="${s.dwellHours}" />
+            </div>
+            <div>
+              <label>Leg mode</label>
+              <select data-k="mode">
+                ${['car','ferry','flight','walk'].map(m=>`<option value="${m}" ${s.mode===m?'selected':''}>${cap(m)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label>Contact</label>
+            <input data-k="contact" value="${escapeHtml(s.contact||'')}" placeholder="Name / phone / email" />
+          </div>
+          <div>
+            <label>Notes</label>
+            <textarea data-k="notes" rows="2">${escapeHtml(s.notes||'')}</textarea>
+          </div>
+        `;
+        // wire inputs
+        div.querySelectorAll('input, select, textarea').forEach(inp=>{
+          inp.addEventListener('input', ()=>{
+            const k = inp.getAttribute('data-k');
+            let v = inp.value;
+            if(k==='lat'||k==='lng'||k==='dwellHours') v = parseFloat(v);
+            stops[idx][k]=v; renderAll();
+          });
+        });
+        div.querySelector('[data-act="up"]').disabled = idx===0;
+        div.querySelector('[data-act="down"]').disabled = idx===stops.length-1;
+        div.querySelector('[data-act="up"]').onclick = ()=>moveStop(idx,-1);
+        div.querySelector('[data-act="down"]').onclick = ()=>moveStop(idx, +1);
+        div.querySelector('[data-act="del"]').onclick = ()=>removeStop(idx);
+        host.appendChild(div);
+      });
+    }
+
+    function renderSummary(){
+      const route = computeRoute();
+      const kpis = [
+        ['Total distance', `${fmt(route.totalKm)} km`],
+        ['Travel time', `${fmt(route.travelHours)} h`],
+        ['Dwell time', `${fmt(stops.reduce((a,s)=>a+Number(s.dwellHours||0),0))} h`],
+        ['Total time', `${fmt(route.totalHours)} h`],
+      ];
+      const k = document.getElementById('kpis');
+      k.innerHTML = kpis.map(([l,v])=>`<div class="kpi"><div class="lab">${l}</div><div class="val">${v}</div></div>`).join('');
+
+      const legs = document.getElementById('legs');
+      legs.innerHTML = route.legs.map((leg,i)=>`<tr>
+        <td>${i+1}</td>
+        <td>#${leg.from+1} ${escapeHtml(stops[leg.from]?.name||'')} → #${leg.to+1} ${escapeHtml(stops[leg.to]?.name||'')}</td>
+        <td style="text-transform:capitalize">${leg.mode}</td>
+        <td>${fmt(leg.km)}</td>
+        <td>${fmt(leg.hours,2)}</td>
+      </tr>`).join('');
+
+      const t = document.getElementById('timing');
+      if(meta.startDate){
+        const start = new Date(meta.startDate);
+        const finish = new Date(start.getTime() + route.totalHours*3600*1000);
+        t.textContent = `Planned start: ${start.toLocaleString()} — Projected finish: ${finish.toLocaleString()}`;
+      } else { t.textContent = ''; }
+    }
+
+    function renderAll(){
+      // push meta fields into inputs if empty initial
+      Object.entries(inputs).forEach(([k,node])=>{ if(node.value!==meta[k]) node.value = meta[k]; });
+      renderStops();
+      renderSummary();
+      refreshMap();
+    }
+
+    // ---------- Import/Export ----------
+    function exportCSV(){
+      const headers = ["Order","Name","Address","Lat","Lng","Contact","WindowStart","WindowEnd","DwellHours","Mode","Notes"];
+      const rows = stops.map((s,i)=>[
+        i+1, s.name, s.address||'', s.lat, s.lng, s.contact||'', s.windowStart||'', s.windowEnd||'', s.dwellHours||0, s.mode||meta.defaultMode, (s.notes||'').replaceAll('\n',' ')
+      ]);
+      const csv = [headers, ...rows].map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(',')).join('\n');
+      download(`${meta.planName||'trip'}-itinerary.csv`, csv);
+    }
+    function exportJSON(){
+      const payload = { meta, stops, route: computeRoute(), generatedAt: new Date().toISOString() };
+      download(`${meta.planName||'trip'}.json`, JSON.stringify(payload, null, 2));
+    }
+    function importJSON(file){
+      const reader = new FileReader();
+      reader.onload = () => {
+        try{
+          const data = JSON.parse(reader.result);
+          if(data.meta) Object.assign(meta, data.meta);
+          if(Array.isArray(data.stops)) stops = data.stops;
+          renderAll();
+        }catch(e){ alert('Invalid JSON file'); }
+      };
+      reader.readAsText(file);
+    }
+
+    // ---------- Events ----------
+    document.getElementById('btnAdd').onclick = ()=>addStop();
+    document.getElementById('btnOptimize').onclick = ()=>optimize();
+    document.getElementById('btnExportCSV').onclick = ()=>exportCSV();
+    document.getElementById('btnExportJSON').onclick = ()=>exportJSON();
+    document.getElementById('importJSON').onchange = (e)=>{ if(e.target.files?.[0]) importJSON(e.target.files[0]); };
+    // Clicking the label opens file input
+    document.querySelector('label.btn').onclick = ()=> document.getElementById('importJSON').click();
+
+    // ---------- Utils ----------
+    function cap(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
+    function escapeHtml(s=''){
+      return s.replace(/[&<>"] /g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"," ":"&nbsp;"}[c]));
+    }
+
+    // ---------- Init ----------
+    // Seed one example stop at Madrid
+    addStop({lat:40.4168, lng:-3.7038}, {name:'Office'});
+    renderAll();
+  </script>
+</body>
+</html>
