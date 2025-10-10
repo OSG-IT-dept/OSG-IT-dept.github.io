@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Chronology & Itinerary Planner</title>
+  <style>
+    :root{--bg:#0b1020;--card:#111832;--muted:#0e1530;--text:#e7ecff;--sub:#a8b3d0;--accent:#7aa2ff;--border:#263056;--good:#42d392;--warn:#ffcc66;--bad:#ff6b6b}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial;color:var(--text);background:linear-gradient(180deg,#0b1020,#0d1230 40%,#0a1026)}
+    .wrap{max-width:1280px;margin:0 auto;padding:16px;display:grid;gap:16px;grid-template-columns:360px 1fr}
+    @media (max-width: 980px){.wrap{grid-template-columns:1fr}}
+    .card{background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.01));border:1px solid var(--border);border-radius:16px;box-shadow:0 10px 24px rgba(0,0,0,.25);overflow:hidden}
+    .card h2{margin:0;padding:14px 16px;font-size:16px;border-bottom:1px solid var(--border);background:rgba(122,162,255,.08)}
+    .card .content{padding:14px 16px}
+    label{display:block;font-size:12px;color:var(--sub);margin-bottom:6px}
+    input,select,textarea{width:100%;background:#0f1733;color:var(--text);border:1px solid var(--border);border-radius:10px;padding:9px 10px;font-size:14px}
+    textarea{resize:vertical}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+    .btns{display:flex;flex-wrap:wrap;gap:8px}
+    button,.btn{background:#15214a;color:var(--text);border:1px solid var(--border);padding:8px 12px;border-radius:10px;cursor:pointer;font-weight:600}
+    button:hover,.btn:hover{background:#1a2a60}
+    button.ghost{background:transparent}
+    small.tip{color:var(--sub);display:block;margin-top:6px}
+    .badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 8px;border-radius:999px;border:1px solid var(--border);background:#101736}
+    table{width:100%;border-collapse:collapse;font-size:14px}
+    th,td{padding:8px 6px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+    th{position:sticky;top:0;background:#101736;z-index:1}
+    .row-actions{display:flex;gap:6px}
+    .sumgrid{display:grid;grid-template-columns:repeat(5, minmax(0,1fr));gap:10px}
+    @media (max-width: 640px){.sumgrid{grid-template-columns:repeat(2, minmax(0,1fr))}}
+    .kpi{text-align:center;border:1px solid var(--border);border-radius:14px;padding:10px}
+    .kpi .lab{font-size:12px;color:var(--sub)}
+    .kpi .val{font-size:18px;font-weight:700;margin-top:4px}
+    .pill{border:1px solid var(--border);padding:6px 10px;border-radius:999px}
+    .flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .sep{height:1px;background:var(--border);margin:12px 0}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <!-- LEFT: Plan + Dictionaries -->
+    <div class="card">
+      <h2>Plan Details</h2>
+      <div class="content">
+        <div class="row">
+          <div>
+            <label>Plan name</label>
+            <input id="planName" placeholder="Ops Trip – Bilbao BQS" />
+          </div>
+          <div>
+            <label>Start date (optional)</label>
+            <input id="startDate" type="datetime-local"/>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>REF_OSG / Work Order</label>
+            <input id="refOSG" placeholder="OSG-2025-1234"/>
+          </div>
+          <div>
+            <label>Client</label>
+            <input id="client"/>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Vessel</label>
+            <input id="vessel"/>
+          </div>
+          <div>
+            <label>Operator / Agency</label>
+            <input id="operator"/>
+          </div>
+        </div>
+        <div>
+          <label>General notes</label>
+          <textarea id="notes" rows="3" placeholder="Permits, PPE, parking, site access, etc."></textarea>
+        </div>
+
+        <div class="sep"></div>
+        <div class="flex"><span class="badge">Dictionaries</span><small class="tip">Customize the options shown in each entry.</small></div>
+        <div class="row">
+          <div>
+            <label>Trip types</label>
+            <input id="tripTypes"/>
+            <small class="tip">Comma-separated (e.g., Car, Ferry, Flight, Train, Taxi)</small>
+          </div>
+          <div>
+            <label>Accommodation types</label>
+            <input id="accomTypes"/>
+            <small class="tip">e.g., Hotel, Hostel, Apartment, Vessel Cabin</small>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Stop categories</label>
+            <input id="stopCats"/>
+            <small class="tip">e.g., Office, Port Gate, Jetty, Customs</small>
+          </div>
+          <div>
+            <label>Operation types</label>
+            <input id="opTypes"/>
+            <small class="tip">e.g., BQS, Sampling, Draft Survey, Inspection</small>
+          </div>
+        </div>
+
+        <div class="sep"></div>
+        <div class="btns">
+          <button id="btnExportCSV" class="ghost">Export CSV</button>
+          <button id="btnExportJSON" class="ghost">Export JSON</button>
+          <label class="btn" style="display:inline-flex;align-items:center;gap:8px;">
+            <input id="importJSON" type="file" accept="application/json" style="display:none"/>
+            Import JSON
+          </label>
+          <button id="btnPrint">Print view</button>
+          <button id="btnClear" style="margin-left:auto">Clear all</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Entries -->
+    <div class="card">
+      <h2>Chronology / Itinerary</h2>
+      <div class="content">
+        <div class="btns" style="margin-bottom:10px">
+          <span class="badge">Add entry</span>
+          <button onclick="addEntry('stop')">+ Stop</button>
+          <button onclick="addEntry('trip')">+ Trip</button>
+          <button onclick="addEntry('stay')">+ Stay (Hotel)</button>
+          <button onclick="addEntry('rest')">+ Rest</button>
+          <button onclick="addEntry('operation')">+ Operation</button>
+        </div>
+        <div style="overflow:auto;max-height:60vh;border:1px solid var(--border);border-radius:12px">
+          <table id="tbl">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Type</th>
+                <th>Start</th>
+                <th>End</th>
+                <th>Location / Title</th>
+                <th>Details</th>
+                <th>Notes</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+        <small class="tip">Tip: Fill start/end to compute durations automatically. Drag order with ▲/▼.</small>
+      </div>
+    </div>
+
+    <!-- BOTTOM LEFT: Totals -->
+    <div class="card">
+      <h2>Totals</h2>
+      <div class="content">
+        <div class="sumgrid" id="totals"></div>
+      </div>
+    </div>
+
+    <!-- BOTTOM RIGHT: Day Buckets (optional) -->
+    <div class="card">
+      <h2>By Day</h2>
+      <div class="content" id="byday"></div>
+    </div>
+  </div>
+
+  <script>
+    // ----------------- STATE -----------------
+    const plan = {
+      meta: { planName:'', refOSG:'', client:'', vessel:'', operator:'', startDate:'', notes:'' },
+      dict: {
+        tripTypes: ['Car','Ferry','Flight','Train','Taxi'],
+        accomTypes: ['Hotel','Hostel','Apartment','Vessel Cabin'],
+        stopCats: ['Office','Port Gate','Jetty','Customs'],
+        opTypes: ['BQS','Sampling','Draft Survey','Inspection']
+      },
+      items: [] // each: {id,type,start,end,title,loc,notes, ...type-specific}
+    };
+
+    // ----------------- ELEMENTS -----------------
+    const $ = (id)=>document.getElementById(id);
+    const inputs = {
+      planName: $('planName'), startDate: $('startDate'), refOSG: $('refOSG'), client: $('client'), vessel: $('vessel'), operator: $('operator'), notes: $('notes'),
+      tripTypes:$('tripTypes'), accomTypes:$('accomTypes'), stopCats:$('stopCats'), opTypes:$('opTypes')
+    };
+
+    Object.entries(inputs).forEach(([k,node])=>{
+      node.addEventListener('input', ()=>{ onInput(k,node.value); });
+      node.addEventListener('change', ()=>{ onInput(k,node.value); });
+    });
+
+    function onInput(key,value){
+      if(key in plan.meta){ plan.meta[key]=value; render(); return; }
+      if(key==='tripTypes') plan.dict.tripTypes = splitList(value);
+      if(key==='accomTypes') plan.dict.accomTypes = splitList(value);
+      if(key==='stopCats') plan.dict.stopCats = splitList(value);
+      if(key==='opTypes') plan.dict.opTypes = splitList(value);
+      render();
+    }
+
+    function splitList(v){ return v.split(',').map(s=>s.trim()).filter(Boolean); }
+    function joinList(a){ return a.join(', '); }
+
+    // ----------------- ENTRIES -----------------
+    function addEntry(type){
+      const id = cryptoRandomId();
+      const base = { id, type, start:'', end:'', title:'', loc:'', notes:'' };
+      let extra={};
+      if(type==='stop') extra = { category: plan.dict.stopCats[0]||'' };
+      if(type==='trip') extra = { tripType: plan.dict.tripTypes[0]||'', distanceKm:'', ref:'', refTicket:'' };
+      if(type==='stay') extra = { accomType: plan.dict.accomTypes[0]||'', address:'', room:'', confirmation:'' };
+      if(type==='rest') extra = { kind:'Rest' };
+      if(type==='operation') extra = { opType: plan.dict.opTypes[0]||'', party:'', refOSG:'' };
+      plan.items.push({ ...base, ...extra });
+      render();
+    }
+    function removeEntry(id){ plan.items = plan.items.filter(x=>x.id!==id); render(); }
+    function moveEntry(id,dir){
+      const idx = plan.items.findIndex(x=>x.id===id); if(idx<0) return;
+      const j = idx+dir; if(j<0 || j>=plan.items.length) return;
+      const [it] = plan.items.splice(idx,1); plan.items.splice(j,0,it); render();
+    }
+
+    function mutate(id,patch){
+      const i = plan.items.findIndex(x=>x.id===id); if(i<0) return;
+      plan.items[i] = { ...plan.items[i], ...patch };
+      render();
+    }
+
+    // ----------------- RENDER -----------------
+    function render(){
+      // meta/dicts to inputs
+      for(const k in plan.meta){ if(inputs[k] && inputs[k].value!==plan.meta[k]) inputs[k].value = plan.meta[k]; }
+      inputs.tripTypes.value = joinList(plan.dict.tripTypes);
+      inputs.accomTypes.value = joinList(plan.dict.accomTypes);
+      inputs.stopCats.value = joinList(plan.dict.stopCats);
+      inputs.opTypes.value = joinList(plan.dict.opTypes);
+
+      renderTable();
+      renderTotals();
+      renderByDay();
+    }
+
+    function renderTable(){
+      const tbody = $('tbody');
+      tbody.innerHTML = '';
+      plan.items.forEach((it, idx)=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${idx+1}</td>
+          <td>${badgeType(it.type)}</td>
+          <td><input type="datetime-local" value="${it.start||''}" data-k="start" style="min-width:175px"></td>
+          <td><input type="datetime-local" value="${it.end||''}" data-k="end" style="min-width:175px"></td>
+          <td>
+            <div class="row">
+              <div><input placeholder="Title" value="${escapeHtml(it.title)}" data-k="title"></div>
+              <div><input placeholder="Location" value="${escapeHtml(it.loc)}" data-k="loc"></div>
+            </div>
+            ${renderTypeExtrasTop(it)}
+          </td>
+          <td>${renderTypeExtrasSide(it)}</td>
+          <td><textarea rows="2" data-k="notes">${escapeHtml(it.notes)}</textarea></td>
+          <td class="row-actions">
+            <button class="ghost" data-act="up">▲</button>
+            <button class="ghost" data-act="down">▼</button>
+            <button class="ghost" data-act="del">🗑</button>
+          </td>
+        `;
+        // wire
+        tr.querySelectorAll('input,select,textarea').forEach(inp=>{
+          const k = inp.getAttribute('data-k');
+          if(!k) return;
+          inp.addEventListener('input', ()=>{
+            let v = inp.value;
+            if(k==='distanceKm') v = v === '' ? '' : parseFloat(v);
+            mutate(it.id, { [k]: v });
+          });
+        });
+        tr.querySelector('[data-act="up"]').disabled = idx===0;
+        tr.querySelector('[data-act="down"]').disabled = idx===plan.items.length-1;
+        tr.querySelector('[data-act="up"]').onclick = ()=>moveEntry(it.id,-1);
+        tr.querySelector('[data-act="down"]').onclick = ()=>moveEntry(it.id, +1);
+        tr.querySelector('[data-act="del"]').onclick = ()=>removeEntry(it.id);
+        tbody.appendChild(tr);
+      });
+    }
+
+    function badgeType(t){
+      const map={stop:['#c8e1ff','#0b2a6b'],trip:['#ffe0c2','#693a00'],stay:['#c5ffd8','#004a2a'],rest:['#e8e8ff','#2b2b6b'],operation:['#ffd6e5','#6b1f3b']};
+      const [bg,fg]=map[t]||['#ddd','#333'];
+      return `<span class="pill" style="background:${bg};color:${fg};border-color:${fg}88">${cap(t)}</span>`;
+    }
+
+    function renderTypeExtrasTop(it){
+      if(it.type==='trip'){
+        return `<div class="row" style="margin-top:6px">
+          <div>
+            <select data-k="tripType">${options(plan.dict.tripTypes,it.tripType)}</select>
+          </div>
+          <div>
+            <input type="number" step="0.1" placeholder="Distance (km)" value="${it.distanceKm!==''?it.distanceKm:''}" data-k="distanceKm">
+          </div>
+        </div>`;
+      }
+      if(it.type==='stay'){
+        return `<div class="row" style="margin-top:6px">
+          <div><select data-k="accomType">${options(plan.dict.accomTypes,it.accomType)}</select></div>
+          <div><input placeholder="Address" value="${escapeHtml(it.address||'')}" data-k="address"></div>
+        </div>`;
+      }
+      if(it.type==='stop'){
+        return `<div class="row" style="margin-top:6px">
+          <div><select data-k="category">${options(plan.dict.stopCats,it.category)}</select></div>
+          <div><input placeholder="Ref / Contact" value="${escapeHtml(it.ref||'')}" data-k="ref"></div>
+        </div>`;
+      }
+      if(it.type==='operation'){
+        return `<div class="row" style="margin-top:6px">
+          <div><select data-k="opType">${options(plan.dict.opTypes,it.opType)}</select></div>
+          <div><input placeholder="Party / Attendees" value="${escapeHtml(it.party||'')}" data-k="party"></div>
+        </div>`;
+      }
+      return '';
+    }
+
+    function renderTypeExtrasSide(it){
+      if(it.type==='trip'){
+        return `Ref: <input placeholder="Ticket/PNR" value="${escapeHtml(it.refTicket||'')}" data-k="refTicket">`;
+      }
+      if(it.type==='stay'){
+        return `Room: <input placeholder="Room" value="${escapeHtml(it.room||'')}" data-k="room"><br/>Confirm: <input placeholder="Code" value="${escapeHtml(it.confirmation||'')}" data-k="confirmation">`;
+      }
+      if(it.type==='stop'){
+        return `Contact: <input placeholder="Name/phone" value="${escapeHtml(it.contact||'')}" data-k="contact">`;
+      }
+      if(it.type==='rest'){
+        return `Kind: <input value="${escapeHtml(it.kind||'Rest')}" data-k="kind">`;
+      }
+      if(it.type==='operation'){
+        return `WO: <input placeholder="REF_OSG" value="${escapeHtml(it.refOSG||'')}" data-k="refOSG">`;
+      }
+      return '';
+    }
+
+    // ----------------- TOTALS -----------------
+    function renderTotals(){
+      const totals = computeTotals();
+      const host = $('totals');
+      const cells = [
+        ['Entries', totals.count],
+        ['Travel time', fmtH(totals.travelHours)],
+        ['Distance', `${(totals.distanceKm||0).toFixed(1)} km`],
+        ['Stay time', fmtH(totals.stayHours)],
+        ['Rest time', fmtH(totals.restHours)],
+        ['Ops time', fmtH(totals.opsHours)],
+        ['Total time', fmtH(totals.totalHours)]
+      ];
+      host.innerHTML = cells.map(([l,v])=>`<div class="kpi"><div class="lab">${l}</div><div class="val">${v}</div></div>`).join('');
+    }
+
+    function computeTotals(){
+      let travel=0, stay=0, rest=0, ops=0, dist=0, count=plan.items.length;
+      for(const it of plan.items){
+        const h = durH(it.start,it.end);
+        if(it.type==='trip'){ travel += h; dist += Number(it.distanceKm||0); }
+        else if(it.type==='stay'){ stay += h; }
+        else if(it.type==='rest'){ rest += h; }
+        else if(it.type==='operation'){ ops += h; }
+      }
+      return { count, travelHours:travel, distanceKm:dist, stayHours:stay, restHours:rest, opsHours:ops, totalHours: travel+stay+rest+ops };
+    }
+
+    // ----------------- BY DAY -----------------
+    function renderByDay(){
+      const host = $('byday'); host.innerHTML='';
+      const groups = {};
+      for(const it of plan.items){
+        const day = it.start? new Date(it.start).toISOString().slice(0,10) : 'Unscheduled';
+        (groups[day] = groups[day] || []).push(it);
+      }
+      const days = Object.keys(groups).sort();
+      if(!days.length){ host.innerHTML = '<small class="tip">No entries yet.</small>'; return; }
+      for(const d of days){
+        const div = document.createElement('div');
+        div.style.marginBottom='14px';
+        const totalH = groups[d].reduce((a,it)=>a+durH(it.start,it.end),0);
+        div.innerHTML = `<div class="flex"><span class="badge">${d}</span><span class="badge">${fmtH(totalH)}</span></div>`;
+        const ul = document.createElement('ul'); ul.style.margin='8px 0 0 18px';
+        for(const it of groups[d]){
+          const h = durH(it.start,it.end);
+          const li = document.createElement('li');
+          li.innerHTML = `${badgeType(it.type)} <b>${escapeHtml(it.title||it.loc||'(untitled)')}</b> — ${it.start?new Date(it.start).toLocaleTimeString():''}${it.end? ' → '+new Date(it.end).toLocaleTimeString():''} ${h? ' ('+fmtH(h)+')' : ''}`;
+          ul.appendChild(li);
+        }
+        div.appendChild(ul);
+        host.appendChild(div);
+      }
+    }
+
+    // ----------------- IO -----------------
+    $('btnExportCSV').onclick = ()=>{
+      const rows = [
+        ['Order','Type','Start','End','Duration(h)','Title','Location','Details1','Details2','Distance(km)','Notes']
+      ];
+      plan.items.forEach((it,i)=>{
+        const h = durH(it.start,it.end);
+        const extra = csvExtras(it);
+        rows.push([ i+1, it.type, it.start, it.end, h.toFixed(2), it.title, it.loc, extra.d1, extra.d2, extra.dist, (it.notes||'').replaceAll('\n',' ') ]);
+      });
+      const csv = rows.map(r=>r.map(v=>`"${String(v??'').replaceAll('"','""')}"`).join(',')).join('\n');
+      download(`${plan.meta.planName||'chronology'}.csv`, csv);
+    };
+    $('btnExportJSON').onclick = ()=>{
+      const payload = structuredClone(plan);
+      download(`${plan.meta.planName||'chronology'}.json`, JSON.stringify(payload,null,2));
+    };
+    $('importJSON').onchange = (e)=>{ const f=e.target.files?.[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ try{ const data=JSON.parse(r.result); Object.assign(plan.meta,data.meta||{}); Object.assign(plan.dict,data.dict||{}); plan.items=Array.isArray(data.items)?data.items:[]; render(); }catch(err){ alert('Invalid JSON'); } }; r.readAsText(f); };
+    $('btnClear').onclick = ()=>{ if(confirm('Clear all entries?')){ plan.items=[]; render(); } };
+    $('btnPrint').onclick = ()=>window.print();
+
+    function csvExtras(it){
+      if(it.type==='trip') return { d1: it.tripType||'', d2: it.refTicket||'', dist: it.distanceKm||'' };
+      if(it.type==='stay') return { d1: it.accomType||'', d2: it.address||'', dist:'' };
+      if(it.type==='stop') return { d1: it.category||'', d2: it.contact||'', dist:'' };
+      if(it.type==='operation') return { d1: it.opType||'', d2: it.party||'', dist:'' };
+      return { d1:'', d2:'', dist:'' };
+    }
+
+    function download(filename,text){
+      const blob = new Blob([text], {type: filename.endsWith('.json')? 'application/json' : 'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url);
+    }
+
+    // ----------------- UTIL -----------------
+    function durH(a,b){ if(!a||!b) return 0; const t=(new Date(b)-new Date(a))/3600000; return isFinite(t)&&t>0? t : 0; }
+    function fmtH(h){ const hh=Math.floor(h); const mm=Math.round((h-hh)*60); return `${hh}h ${String(mm).padStart(2,'0')}m`; }
+    function cap(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
+    function options(list,sel){ return (list||[]).map(v=>`<option value="${escapeHtml(v)}" ${sel===v?'selected':''}>${escapeHtml(v)}</option>`).join(''); }
+    function escapeHtml(s=''){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+    function cryptoRandomId(){ try{ return crypto.randomUUID(); }catch{ return 'id_'+Math.random().toString(36).slice(2); } }
+
+    // ----------------- SEED + RENDER -----------------
+    // Seed dictionaries into inputs
+    plan.meta.planName = 'Ops Trip – Example';
+    plan.items.push(
+      { id:cryptoRandomId(), type:'stop', start:'', end:'', title:'Office', loc:'Madrid', category:'Office', notes:'' },
+      { id:cryptoRandomId(), type:'trip', start:'2025-10-10T07:30', end:'2025-10-10T11:00', title:'Drive to Bilbao', loc:'A-1 → AP-68', tripType:'Car', distanceKm:395, refTicket:'', notes:'Tolls expected' },
+      { id:cryptoRandomId(), type:'operation', start:'2025-10-10T12:00', end:'2025-10-10T18:30', title:'BQS on M/T Example', loc:'Bilbao Jetty 3', opType:'BQS', party:'Chief Engineer', notes:'Follow safety briefing' },
+      { id:cryptoRandomId(), type:'stay', start:'2025-10-10T19:30', end:'2025-10-11T07:00', title:'Overnight', loc:'Bilbao', accomType:'Hotel', address:'Hotel Dockside', room:'205', confirmation:'ABC123', notes:'' },
+      { id:cryptoRandomId(), type:'rest', start:'2025-10-11T07:00', end:'2025-10-11T08:00', title:'Breakfast & Rest', loc:'', kind:'Rest', notes:'' }
+    );
+    render();
+  </script>
+</body>
+</html>
