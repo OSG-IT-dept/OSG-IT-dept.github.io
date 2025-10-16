@@ -3,377 +3,122 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Bulk Image Downscaler</title>
+  <title>Bulk Image Downscaler (ZIP Only)</title>
   <style>
-    :root { --bg:#0b1020; --card:#121832; --muted:#9fb0d0; --text:#e8eeff; --accent:#7aa2ff; }
-    html,body{height:100%}
-    body{margin:0;background:linear-gradient(135deg,var(--bg),#12152a);color:var(--text);font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Noto Sans", "Helvetica Neue", Arial}
-    .wrap{max-width:980px;margin:32px auto;padding:0 16px}
-    h1{font-weight:800;letter-spacing:.2px;margin:0 0 8px}
-    p.sub{margin:0 0 20px;color:var(--muted)}
-    .card{background:var(--card);border:1px solid #1b2447;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.25);padding:18px}
-    .grid{display:grid;gap:16px}
-    .grid.cols{grid-template-columns:1fr 1fr}
-    @media (max-width:860px){.grid.cols{grid-template-columns:1fr}}
-    label{display:block;font-weight:600;margin-bottom:6px}
-    input[type="number"], input[type="text"], input[type="file"], select{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #24305f;background:#0e1430;color:var(--text)}
-    input[type="range"]{width:100%}
-    .row{display:flex;gap:10px;align-items:center}
-    .btn{cursor:pointer;display:inline-flex;align-items:center;gap:8px;background:var(--accent);color:#0b1020;padding:10px 14px;border-radius:12px;border:none;font-weight:700}
-    .btn.secondary{background:#1f2a55;color:var(--text);border:1px solid #2b3a78}
-    .btn:disabled{opacity:.5;cursor:not-allowed}
-    .muted{color:var(--muted)}
-    progress{width:100%;height:16px}
-    .thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
-    .thumb{background:#0d1330;border:1px solid #223068;border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:6px}
-    .thumb img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px}
-    .pill{background:#1c274f;color:#cfe1ff;border-radius:999px;padding:2px 8px;font-size:12px}
-    footer{margin:22px 0 12px;color:#90a4d4}
-    .small{font-size:12px}
-    .spacer{height:8px}
-    code.kbd{background:#0e1430;border:1px solid #28356b;border-radius:6px;padding:2px 6px}
+    body {font-family: system-ui, sans-serif; background: #0b1020; color: #e8eeff; margin: 0; padding: 0;}
+    .container {max-width: 800px; margin: 40px auto; background: #121832; padding: 24px; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.4);}
+    h1 {margin-top: 0; color: #7aa2ff;}
+    label {display: block; margin-top: 12px; margin-bottom: 4px; font-weight: bold;}
+    input, select {width: 100%; padding: 8px; border-radius: 8px; border: 1px solid #2a366f; background: #0d1430; color: #e8eeff;}
+    button {background: #7aa2ff; border: none; color: #0b1020; padding: 10px 16px; font-weight: bold; border-radius: 10px; cursor: pointer; margin-top: 16px;}
+    button:disabled {opacity: 0.6; cursor: not-allowed;}
+    progress {width: 100%; height: 18px; margin-top: 16px;}
+    .muted {color: #9fb0d0; font-size: 13px;}
+    .thumbs {display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:10px; margin-top:20px;}
+    .thumb {background:#0d1330; border:1px solid #223068; border-radius:12px; padding:6px; text-align:center;}
+    .thumb img{width:100%; border-radius:8px; object-fit:cover;}
   </style>
 </head>
 <body>
-  <div class="wrap">
+  <div class="container">
     <h1>Bulk Image Downscaler</h1>
-    <p class="sub">Load a folder of images → choose output size/format → save to an output folder or download a ZIP. Everything runs locally in your browser.</p>
+    <p class="muted">Select a folder of images or multiple image files. The tool will resize them to a lower resolution and generate a ZIP file for download. Works locally, no uploads.</p>
 
-    <div class="card grid">
-      <div class="grid cols">
-        <div>
-          <label>1) Select input folder (images)</label>
-          <input id="inputDir" type="file" webkitdirectory multiple accept="image/*" />
-          <div class="spacer"></div>
-          <div class="row">
-            <button id="btnPickOut" class="btn secondary" title="Use the File System Access API to choose a destination folder (Chromium browsers)">Choose output folder</button>
-            <span id="outFolderName" class="muted small"></span>
-          </div>
-          <div class="spacer"></div>
-          <div class="grid cols">
-            <div>
-              <label>Max width (px)</label>
-              <input id="maxW" type="number" min="1" value="1920" />
-            </div>
-            <div>
-              <label>Max height (px)</label>
-              <input id="maxH" type="number" min="1" value="1080" />
-            </div>
-          </div>
-          <div class="grid cols">
-            <div>
-              <label>Output format</label>
-              <select id="format">
-                <option value="image/jpeg">JPEG (.jpg)</option>
-                <option value="image/webp">WebP (.webp)</option>
-                <option value="image/png">PNG (.png)</option>
-              </select>
-            </div>
-            <div>
-              <label>Quality (0.1–1, lossy)</label>
-              <input id="quality" type="range" min="0.1" max="1" step="0.05" value="0.8" />
-              <div class="row"><span class="muted small">Current: <span id="qVal">0.80</span></span></div>
-            </div>
-          </div>
-          <div class="grid cols">
-            <div>
-              <label>Filename suffix</label>
-              <input id="suffix" type="text" value="-small" />
-            </div>
-            <div>
-              <label>Skip if already smaller than target</label>
-              <select id="skipSmall">
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
-              </select>
-            </div>
-          </div>
-          <div class="spacer"></div>
-          <div class="row">
-            <button id="btnStart" class="btn">Start downscaling</button>
-            <button id="btnZip" class="btn secondary" disabled>Download ZIP</button>
-          </div>
-          <div class="spacer"></div>
-          <progress id="prog" value="0" max="100"></progress>
-          <div class="row"><span id="status" class="muted small">Idle</span></div>
-        </div>
+    <label>Select images or folder</label>
+    <input id="inputDir" type="file" webkitdirectory multiple accept="image/*" />
 
-        <div>
-          <label>Preview</label>
-          <div id="thumbs" class="thumbs"></div>
-        </div>
-      </div>
-    </div>
+    <label>Max width (px)</label>
+    <input id="maxW" type="number" min="1" value="1920" />
 
-    <footer class="small">
-      Tip: Chrome/Edge let you save directly to a folder. On other browsers, use <b>Download ZIP</b>. Your images never leave your device.
-      <br/>Keyboard: press <code class="kbd">Enter</code> to start once files are selected.
-    </footer>
+    <label>Max height (px)</label>
+    <input id="maxH" type="number" min="1" value="1080" />
+
+    <label>Output format</label>
+    <select id="format">
+      <option value="image/jpeg">JPEG (.jpg)</option>
+      <option value="image/webp">WebP (.webp)</option>
+      <option value="image/png">PNG (.png)</option>
+    </select>
+
+    <label>Quality (0.1–1.0)</label>
+    <input id="quality" type="range" min="0.1" max="1" step="0.05" value="0.8">
+    <div class="muted">Current: <span id="qVal">0.8</span></div>
+
+    <label>Filename suffix</label>
+    <input id="suffix" type="text" value="-small" />
+
+    <label>Skip smaller than target?</label>
+    <select id="skipSmall">
+      <option value="yes">Yes</option>
+      <option value="no">No</option>
+    </select>
+
+    <button id="btnStart">Start & Download ZIP</button>
+
+    <progress id="prog" value="0" max="100"></progress>
+    <div id="status" class="muted">Idle</div>
+
+    <div id="thumbs" class="thumbs"></div>
   </div>
 
-  <!-- JSZip for ZIP fallback (small, CDN). If offline, the direct-folder save still works in Chromium browsers. -->
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-
   <script>
-    const $ = (sel) => document.querySelector(sel);
-    const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+    const $ = (s)=>document.querySelector(s);
+    const inputDir=$('#inputDir'), maxW=$('#maxW'), maxH=$('#maxH'), quality=$('#quality'), qVal=$('#qVal'), formatSel=$('#format'), suffix=$('#suffix'), skipSmall=$('#skipSmall'), btnStart=$('#btnStart'), prog=$('#prog'), status=$('#status'), thumbs=$('#thumbs');
 
-    const inputDir = $('#inputDir');
-    const btnPickOut = $('#btnPickOut');
-    const outFolderName = $('#outFolderName');
-    const maxW = $('#maxW');
-    const maxH = $('#maxH');
-    const quality = $('#quality');
-    const qVal = $('#qVal');
-    const formatSel = $('#format');
-    const suffix = $('#suffix');
-    const skipSmall = $('#skipSmall');
-    const btnStart = $('#btnStart');
-    const btnZip = $('#btnZip');
-    const prog = $('#prog');
-    const status = $('#status');
-    const thumbs = $('#thumbs');
+    let files=[];
+    quality.addEventListener('input',()=>qVal.textContent=quality.value);
 
-    let outputDirHandle = null;
-    let files = [];
-    let resizedBlobs = []; // { name, blob, zipPath }
-    let zipNameCounts = new Map();
-    let saveNameCounts = new Map();
-
-    quality.addEventListener('input', () => qVal.textContent = (+quality.value).toFixed(2));
-
-    inputDir.addEventListener('change', () => {
-      files = Array.from(inputDir.files).filter(f => f.type.startsWith('image/'));
-      thumbnails(files.slice(0, 30));
-      status.textContent = files.length ? `Loaded ${files.length} image(s).` : 'Idle';
-      btnZip.disabled = true;
-      resizedBlobs = [];
-      zipNameCounts = new Map();
-      saveNameCounts = new Map();
-      prog.value = 0;
-    });
-
-    async function pickOutputFolder(){
-      if (!window.showDirectoryPicker){
-        alert('Your browser does not support choosing an output folder. Use the ZIP download instead.');
-        return;
-      }
-      try{
-        outputDirHandle = await window.showDirectoryPicker({mode:'readwrite'});
-        outFolderName.textContent = `→ ${outputDirHandle.name}`;
-      }catch(e){
-        console.warn(e);
-      }
-    }
-
-    btnPickOut.addEventListener('click', pickOutputFolder);
-
-    function thumbnails(flist){
-      thumbs.innerHTML = '';
-      for (const f of flist){
-        const url = URL.createObjectURL(f);
-        const div = document.createElement('div');
-        div.className = 'thumb';
-        div.innerHTML = `<img src="${url}" alt="thumb"><div class="row"><span class="pill small">${Math.round(f.size/1024)} KB</span><span class="muted small">${f.name}</span></div>`;
+    inputDir.addEventListener('change',()=>{
+      files=Array.from(inputDir.files).filter(f=>f.type.startsWith('image/'));
+      thumbs.innerHTML='';
+      for(const f of files.slice(0,20)){
+        const url=URL.createObjectURL(f);
+        const div=document.createElement('div');
+        div.className='thumb';
+        div.innerHTML=`<img src="${url}"/><div class='muted' style='font-size:12px;'>${f.name}</div>`;
         thumbs.appendChild(div);
-        div.querySelector('img').onload = () => URL.revokeObjectURL(url);
+        div.querySelector('img').onload=()=>URL.revokeObjectURL(url);
       }
-    }
-
-    async function loadImage(file){
-      const bitmap = await createImageBitmap(file);
-      const {width, height} = bitmap;
-      return {bitmap, width, height};
-    }
-
-    function calcTargetSize(w,h,maxW,maxH){
-      const scale = Math.min(maxW / w, maxH / h, 1); // never upscale
-      return {tw: Math.round(w * scale), th: Math.round(h * scale), scaled: scale < 1};
-    }
-
-    async function resizeBitmap(bitmap, tw, th, type, quality){
-      const canvas = document.createElement('canvas');
-      canvas.width = tw; canvas.height = th;
-      const ctx = canvas.getContext('2d');
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(bitmap, 0, 0, tw, th);
-      return new Promise((resolve)=> canvas.toBlob(b=>resolve(b), type, type.includes('jpeg')||type.includes('webp') ? quality : undefined));
-    }
-
-    function swapExt(name, newExt){
-      const dot = name.lastIndexOf('.');
-      const base = dot>0 ? name.slice(0,dot) : name;
-      return base + newExt;
-    }
-
-    async function ensureDir(path){
-      // Create nested directories under the chosen output folder
-      let dirHandle = outputDirHandle;
-      const parts = path.split('/').filter(Boolean);
-      // Exclude last part if it's a file
-      for (const part of parts){
-        dirHandle = await dirHandle.getDirectoryHandle(part, { create: true });
-      }
-      return dirHandle;
-    }
-
-    async function saveToFolderWithPath(zipPath, blob){
-      if (!outputDirHandle) return false;
-      try{
-        const lastSlash = zipPath.lastIndexOf('/')
-        const dirPath = lastSlash > -1 ? zipPath.slice(0,lastSlash) : '';
-        const fileName = lastSlash > -1 ? zipPath.slice(lastSlash+1) : zipPath;
-        let targetDir = outputDirHandle;
-        if (dirPath){ targetDir = await ensureDir(dirPath); }
-        const fileHandle = await targetDir.getFileHandle(fileName, { create: true });
-        const writable = await fileHandle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-        return true;
-      }catch(e){ console.warn('save fail', e); return false; }
+      status.textContent=`Loaded ${files.length} image(s)`;
     });
-        const writable = await fileHandle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-        return true;
-      }catch(e){ console.warn('save fail', e); return false; }
-    }
+
+    async function loadImage(file){const bmp=await createImageBitmap(file);return {bmp,width:bmp.width,height:bmp.height};}
+    function calcSize(w,h,maxW,maxH){const s=Math.min(maxW/w,maxH/h,1);return {tw:Math.round(w*s),th:Math.round(h*s),scaled:s<1};}
+
+    async function resize(bmp,tw,th,type,q){const c=document.createElement('canvas');c.width=tw;c.height=th;const ctx=c.getContext('2d');ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(bmp,0,0,tw,th);return new Promise(r=>c.toBlob(b=>r(b),type,type.includes('jpeg')||type.includes('webp')?q:undefined));}
 
     async function start(){
-      if (!files.length){ alert('Please select an input folder with images.'); return; }
-      btnStart.disabled = true; btnZip.disabled = true; status.textContent = 'Processing...';
-      resizedBlobs = []; zipNameCounts = new Map(); saveNameCounts = new Map();
-      const maxw = Math.max(1, +maxW.value||1); const maxh = Math.max(1, +maxH.value||1);
-      const outType = formatSel.value; const q = +quality.value;
-
-      const extFromType = (t)=> t === 'image/jpeg' ? '.jpg' : t === 'image/png' ? '.png' : '.webp';
-      const addIndexBeforeExt = (name, idx)=>{
-        const dot = name.lastIndexOf('.');
-        const base = dot>0 ? name.slice(0,dot) : name;
-        const ext = dot>0 ? name.slice(dot) : '';
-        return `${base} (${idx})${ext}`;
-      };
-      const uniquePath = (path, map)=>{
-        let key = path.toLowerCase();
-        if (!map.has(key)){ map.set(key, 1); return path; }
-        let i = map.get(key) + 1;
-        let candidate = path;
-        do {
-          // add index before extension on the filename part
-          const slash = path.lastIndexOf('/');
-          const dir = slash>-1 ? path.slice(0,slash+1) : '';
-          const file = slash>-1 ? path.slice(slash+1) : path;
-          candidate = dir + addIndexBeforeExt(file, i);
-          key = candidate.toLowerCase();
-          i++;
-        } while (map.has(key));
-        map.set(key, i-1);
-        return candidate;
-      };
-
-      let processed = 0; let written = 0; let skipped = 0;
-      for (const f of files){
+      if(!files.length){alert('Select images first');return;}
+      btnStart.disabled=true;status.textContent='Processing...';prog.value=0;
+      const zip=new JSZip();
+      const maxw=+maxW.value,maxh=+maxH.value,q=+quality.value,type=formatSel.value;
+      let done=0;
+      for(const f of files){
         try{
-          const {bitmap, width, height} = await loadImage(f);
-          const {tw, th, scaled} = calcTargetSize(width, height, maxw, maxh);
-          if (skipSmall.value === 'yes' && !scaled){
-            skipped++; processed++;
-            prog.value = (processed / files.length) * 100;
-            status.textContent = `Skipped ${skipped} (already small). ${processed}/${files.length}`;
-            continue;
-          }
-          const blob = await resizeBitmap(bitmap, tw, th, outType, q);
-          const ext = extFromType(outType);
-
-          // Build relative path (preserve subfolders when provided by webkitdirectory)
-          const rel = f.webkitRelativePath && f.webkitRelativePath.length ? f.webkitRelativePath : f.name;
-          const slash = rel.lastIndexOf('/');
-          const dir = slash>-1 ? rel.slice(0, slash+1) : '';
-          const fname = slash>-1 ? rel.slice(slash+1) : rel;
-          const base = fname.includes('.') ? fname.slice(0, fname.lastIndexOf('.')) : fname;
-
-          const outName = base + suffix.value + ext; // file name only
-          let zipPath = dir + outName;               // include directory in zip
-          zipPath = uniquePath(zipPath, zipNameCounts);
-
-          let saved = false;
-          if (outputDirHandle){ saved = await saveToFolderWithPath(zipPath, blob); if (saved) written++; }
-          if (!saved){ resizedBlobs.push({ name: outName, blob, zipPath }); }
-          processed++;
-          prog.value = (processed / files.length) * 100;
-          status.textContent = `Processed ${processed}/${files.length} • Saved ${written}${outputDirHandle?' to folder':''}${resizedBlobs.length?` • Pending in ZIP: ${resizedBlobs.length}`:''}`;
-        }catch(e){ console.error(e); processed++; }
+          const {bmp,width,height}=await loadImage(f);
+          const {tw,th,scaled}=calcSize(width,height,maxw,maxh);
+          if(skipSmall.value==='yes'&&!scaled){done++;continue;}
+          const blob=await resize(bmp,tw,th,type,q);
+          const ext=type==='image/jpeg'?'.jpg':type==='image/png'?'.png':'.webp';
+          const base=f.name.replace(/\.[^/.]+$/,'');
+          const outName=base+suffix.value+ext;
+          zip.file(outName,blob);
+        }catch(e){console.error(e);}
+        done++;prog.value=(done/files.length)*100;status.textContent=`Processed ${done}/${files.length}`;
       }
-      btnStart.disabled = false;
-      btnZip.disabled = resizedBlobs.length === 0;
-      if (outputDirHandle && resizedBlobs.length===0){ status.textContent += ' • Done ✅'; }
-      else{ status.textContent += ' • You can download the ZIP ✅'; }
-    }
-      btnStart.disabled = true; btnZip.disabled = true; status.textContent = 'Processing...';
-      resizedBlobs = [];
-      const maxw = Math.max(1, +maxW.value||1); const maxh = Math.max(1, +maxH.value||1);
-      const outType = formatSel.value; const q = +quality.value;
-
-      let processed = 0; let written = 0; let skipped = 0;
-      for (const f of files){
-        try{
-          const {bitmap, width, height} = await loadImage(f);
-          const {tw, th, scaled} = calcTargetSize(width, height, maxw, maxh);
-          if (skipSmall.value === 'yes' && !scaled){
-            skipped++; processed++;
-            prog.value = (processed / files.length) * 100;
-            status.textContent = `Skipped ${skipped} (already small). ${processed}/${files.length}`;
-            continue;
-          }
-          const blob = await resizeBitmap(bitmap, tw, th, outType, q);
-          const ext = outType === 'image/jpeg' ? '.jpg' : outType === 'image/png' ? '.png' : '.webp';
-          const outName = swapExt(f.name, '') + suffix.value + ext;
-          let saved = false;
-          if (outputDirHandle){ saved = await saveToFolder(outName, blob); if (saved) written++; }
-          if (!saved){ resizedBlobs.push({ name: outName, blob }); }
-          processed++;
-          prog.value = (processed / files.length) * 100;
-          status.textContent = `Processed ${processed}/${files.length} • Saved ${written}${outputDirHandle?' to folder':''}${resizedBlobs.length?` • Pending in ZIP: ${resizedBlobs.length}`:''}`;
-        }catch(e){ console.error(e); processed++; }
-      }
-      btnStart.disabled = false;
-      btnZip.disabled = resizedBlobs.length === 0;
-      if (outputDirHandle && resizedBlobs.length===0){ status.textContent += ' • Done ✅'; }
-      else{ status.textContent += ' • You can download the ZIP ✅'; }
+      const blob=await zip.generateAsync({type:'blob'});
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download='downscaled_images.zip';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},2000);
+      status.textContent='ZIP downloaded ✅';
+      btnStart.disabled=false;
     }
 
-    async function downloadZip(){
-      if (!resizedBlobs.length){ alert('Nothing to zip.'); return; }
-      const zip = new JSZip();
-      for (const item of resizedBlobs){
-        // Use zipPath to avoid overwriting files with same names from different subfolders
-        zip.file(item.zipPath || item.name, item.blob);
-      }
-      status.textContent = 'Zipping...';
-      const blob = await zip.generateAsync({type:'blob'});
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'downscaled_images.zip';
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
-      status.textContent = 'ZIP downloaded. ✅';
-    }
-      const zip = new JSZip();
-      for (const item of resizedBlobs){ zip.file(item.name, item.blob); }
-      status.textContent = 'Zipping...';
-      const blob = await zip.generateAsync({type:'blob'});
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'downscaled_images.zip';
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
-      status.textContent = 'ZIP downloaded. ✅';
-    }
-
-    btnStart.addEventListener('click', start);
-    btnZip.addEventListener('click', downloadZip);
-    document.addEventListener('keydown', (e)=>{ if (e.key==='Enter' && files.length) start(); });
+    btnStart.addEventListener('click',start);
   </script>
 </body>
 </html>
