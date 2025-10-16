@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marine Condition Photo Logger</title>
+<style>
+  body {font-family: system-ui, sans-serif; background:#0b1020; color:#e8eeff; margin:0; padding:0;}
+  .container {max-width:800px; margin:20px auto; background:#121832; padding:20px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,0.4);}
+  h1 {color:#7aa2ff;}
+  .grid {display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px;}
+  input, select, button {width:100%; padding:8px; border-radius:8px; border:1px solid #2a366f; background:#0d1430; color:#e8eeff;}
+  button {background:#7aa2ff; color:#0b1020; font-weight:bold; cursor:pointer;}
+  button:disabled {opacity:0.6;}
+  .tag-group {margin-top:20px; background:#1a2042; padding:12px; border-radius:10px;}
+  .thumbs {display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:8px; margin-top:10px;}
+  .thumb img {width:100%; border-radius:6px; border:1px solid #22305e;}
+  .muted {color:#9fb0d0; font-size:13px;}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Marine Condition Photo Logger</h1>
+  <p class="muted">Take tagged photos directly from your device. Works offline. All photos can be downloaded as a ZIP, grouped by tag.</p>
+
+  <div class="grid">
+    <div>
+      <label>Tag / Area</label>
+      <input id="tagInput" placeholder="e.g., Hold 1, Engine Room">
+    </div>
+    <div>
+      <label>Add New Tag</label>
+      <button id="addTag">Create Tag</button>
+    </div>
+  </div>
+
+  <div id="tagList"></div>
+
+  <hr style="margin:20px 0;border-color:#26305e;">
+  <button id="downloadZip">Download All as ZIP</button>
+  <button id="clearAll" style="background:#ff6a6a;color:#fff;">Clear All Photos</button>
+  <div id="status" class="muted" style="margin-top:10px;">Ready.</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script>
+  const tags = {};
+  const tagList = document.getElementById('tagList');
+  const addTagBtn = document.getElementById('addTag');
+  const tagInput = document.getElementById('tagInput');
+  const status = document.getElementById('status');
+
+  function renderTags() {
+    tagList.innerHTML = '';
+    Object.keys(tags).forEach(tag => {
+      const div = document.createElement('div');
+      div.className = 'tag-group';
+      div.innerHTML = `
+        <h3>${tag}</h3>
+        <input type="file" accept="image/*" capture="environment" multiple data-tag="${tag}">
+        <div class="thumbs" id="thumbs-${tag}"></div>
+      `;
+      tagList.appendChild(div);
+      const input = div.querySelector('input');
+      input.addEventListener('change', handleFiles);
+    });
+  }
+
+  addTagBtn.onclick = () => {
+    const tag = tagInput.value.trim();
+    if (!tag) return alert('Enter a tag name first.');
+    if (!tags[tag]) tags[tag] = [];
+    tagInput.value = '';
+    renderTags();
+  };
+
+  function handleFiles(e) {
+    const tag = e.target.dataset.tag;
+    const files = Array.from(e.target.files);
+    const thumbs = document.getElementById(`thumbs-${tag}`);
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = document.createElement('img');
+        img.src = reader.result;
+        const time = new Date().toISOString().replace(/[:T]/g, '-').split('.')[0];
+        tags[tag].push({ name: `${tag}_${time}.jpg`, dataUrl: reader.result });
+        thumbs.appendChild(img);
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  }
+
+  document.getElementById('downloadZip').onclick = async () => {
+    if (Object.keys(tags).length === 0) return alert('No photos to download.');
+    const zip = new JSZip();
+    for (const [tag, photos] of Object.entries(tags)) {
+      const folder = zip.folder(tag);
+      for (const photo of photos) {
+        const base64 = photo.dataUrl.split(',')[1];
+        folder.file(photo.name, base64, { base64: true });
+      }
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'condition_photos.zip';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    status.textContent = 'ZIP downloaded ✅';
+  };
+
+  document.getElementById('clearAll').onclick = () => {
+    if (!confirm('This will remove all photos. Continue?')) return;
+    for (const key in tags) delete tags[key];
+    renderTags();
+    status.textContent = 'All photos cleared.';
+  };
+</script>
+</body>
+</html>
