@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Marine Draft Survey Calculator</title>
+  <style>
+    body {font-family: system-ui, sans-serif; background:#0b1020; color:#e8eeff; margin:0; padding:0;}
+    .container {max-width:950px; margin:40px auto; background:#121832; padding:24px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,0.4);}
+    h1 {margin-top:0; color:#7aa2ff;}
+    h2 {color:#7aa2ff; border-bottom:1px solid #26305e; padding-bottom:4px;}
+    label {display:block; margin-top:10px; font-weight:600;}
+    input {width:100%; padding:8px; border-radius:8px; border:1px solid #2a366f; background:#0d1430; color:#e8eeff;}
+    .grid {display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px;}
+    .section {background:#1a2042; padding:16px; border-radius:10px; margin-top:20px;}
+    .output {font-size:16px; font-weight:600; color:#aee7ff; margin-top:8px;}
+    .muted {color:#9fb0d0; font-size:13px;}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Marine Draft Survey Calculator</h1>
+    <p class="muted">This tool calculates vessel displacement and cargo weight from initial and final draft surveys, applying water density correction.</p>
+
+    <div class="section" id="initialSection">
+      <h2>Initial Survey</h2>
+      <div class="grid">
+        <div><label>Fore Draft (m)</label><input id="iFore" type="number" step="0.001" value="10.12"></div>
+        <div><label>Mid Draft (m)</label><input id="iMid" type="number" step="0.001" value="10.20"></div>
+        <div><label>Aft Draft (m)</label><input id="iAft" type="number" step="0.001" value="10.30"></div>
+      </div>
+      <div class="grid">
+        <div><label>Draft 1 (m)</label><input id="iD1" type="number" step="0.01" value="10.0"></div>
+        <div><label>Displacement @ Draft 1 (t)</label><input id="iDisp1" type="number" step="0.1" value="20000"></div>
+        <div><label>Draft 2 (m)</label><input id="iD2" type="number" step="0.01" value="11.0"></div>
+        <div><label>Displacement @ Draft 2 (t)</label><input id="iDisp2" type="number" step="0.1" value="22000"></div>
+      </div>
+      <div class="grid">
+        <div><label>Measured Water Density (t/m³)</label><input id="iRho" type="number" step="0.0001" value="1.023"></div>
+        <div><label>Ballast/Consumables (t)</label><input id="iBallast" type="number" step="0.1" value="500"></div>
+      </div>
+      <div class="output">Mean Draft: <span id="iMean">–</span> m</div>
+      <div class="output">Trim: <span id="iTrim">–</span> m</div>
+      <div class="output">Corrected Displacement: <span id="iCorrDisp">–</span> t</div>
+    </div>
+
+    <div class="section" id="finalSection">
+      <h2>Final Survey</h2>
+      <div class="grid">
+        <div><label>Fore Draft (m)</label><input id="fFore" type="number" step="0.001" value="10.70"></div>
+        <div><label>Mid Draft (m)</label><input id="fMid" type="number" step="0.001" value="10.80"></div>
+        <div><label>Aft Draft (m)</label><input id="fAft" type="number" step="0.001" value="10.95"></div>
+      </div>
+      <div class="grid">
+        <div><label>Draft 1 (m)</label><input id="fD1" type="number" step="0.01" value="10.0"></div>
+        <div><label>Displacement @ Draft 1 (t)</label><input id="fDisp1" type="number" step="0.1" value="20000"></div>
+        <div><label>Draft 2 (m)</label><input id="fD2" type="number" step="0.01" value="11.0"></div>
+        <div><label>Displacement @ Draft 2 (t)</label><input id="fDisp2" type="number" step="0.1" value="22000"></div>
+      </div>
+      <div class="grid">
+        <div><label>Measured Water Density (t/m³)</label><input id="fRho" type="number" step="0.0001" value="1.024"></div>
+        <div><label>Ballast/Consumables (t)</label><input id="fBallast" type="number" step="0.1" value="480"></div>
+      </div>
+      <div class="output">Mean Draft: <span id="fMean">–</span> m</div>
+      <div class="output">Trim: <span id="fTrim">–</span> m</div>
+      <div class="output">Corrected Displacement: <span id="fCorrDisp">–</span> t</div>
+    </div>
+
+    <div class="section">
+      <h2>Results Summary</h2>
+      <div class="output">Initial Displacement: <span id="resInitDisp">–</span> t</div>
+      <div class="output">Final Displacement: <span id="resFinalDisp">–</span> t</div>
+      <div class="output">Cargo Weight: <span id="resCargo">–</span> t</div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (s)=>document.querySelector(s);
+
+    function meanDraft(f,m,a){return (f+m+a)/3;}
+    function trim(a,f){return a-f;}
+    function interpDisp(d, d1, d2, disp1, disp2){
+      if(d2===d1) return disp1;
+      return disp1 + (disp2 - disp1)*((d - d1)/(d2 - d1));
+    }
+    function densityCorrection(disp, rho, rhoTable=1.025){return disp*(rho/rhoTable);}
+
+    function updateInitial(){
+      const f=parseFloat($('#iFore').value)||0;
+      const m=parseFloat($('#iMid').value)||0;
+      const a=parseFloat($('#iAft').value)||0;
+      const md=meanDraft(f,m,a); $('#iMean').textContent=md.toFixed(3);
+      const tr=trim(a,f); $('#iTrim').textContent=tr.toFixed(3);
+
+      const d1=parseFloat($('#iD1').value)||0;
+      const d2=parseFloat($('#iD2').value)||0;
+      const disp1=parseFloat($('#iDisp1').value)||0;
+      const disp2=parseFloat($('#iDisp2').value)||0;
+      const rho=parseFloat($('#iRho').value)||1.025;
+
+      let disp=interpDisp(md,d1,d2,disp1,disp2);
+      disp=densityCorrection(disp,rho,1.025);
+      $('#iCorrDisp').textContent=disp.toFixed(2);
+      return disp;
+    }
+
+    function updateFinal(){
+      const f=parseFloat($('#fFore').value)||0;
+      const m=parseFloat($('#fMid').value)||0;
+      const a=parseFloat($('#fAft').value)||0;
+      const md=meanDraft(f,m,a); $('#fMean').textContent=md.toFixed(3);
+      const tr=trim(a,f); $('#fTrim').textContent=tr.toFixed(3);
+
+      const d1=parseFloat($('#fD1').value)||0;
+      const d2=parseFloat($('#fD2').value)||0;
+      const disp1=parseFloat($('#fDisp1').value)||0;
+      const disp2=parseFloat($('#fDisp2').value)||0;
+      const rho=parseFloat($('#fRho').value)||1.025;
+
+      let disp=interpDisp(md,d1,d2,disp1,disp2);
+      disp=densityCorrection(disp,rho,1.025);
+      $('#fCorrDisp').textContent=disp.toFixed(2);
+      return disp;
+    }
+
+    function updateResults(){
+      const iDisp=updateInitial();
+      const fDisp=updateFinal();
+      const iBall=parseFloat($('#iBallast').value)||0;
+      const fBall=parseFloat($('#fBallast').value)||0;
+      const cargo=(fDisp - iDisp) - (fBall - iBall);
+      $('#resInitDisp').textContent=iDisp.toFixed(2);
+      $('#resFinalDisp').textContent=fDisp.toFixed(2);
+      $('#resCargo').textContent=cargo.toFixed(2);
+    }
+
+    document.querySelectorAll('input').forEach(inp=>inp.addEventListener('input',updateResults));
+    updateResults();
+  </script>
+</body>
+</html>
