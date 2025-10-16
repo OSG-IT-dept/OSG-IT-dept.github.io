@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Marine Bunker Sounding & Density Calculator</title>
+  <style>
+    body {font-family: system-ui, sans-serif; background:#0b1020; color:#e8eeff; margin:0; padding:0;}
+    .container {max-width:900px; margin:40px auto; background:#121832; padding:24px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,0.4);}
+    h1 {margin-top:0; color:#7aa2ff;}
+    h2 {color:#7aa2ff; border-bottom:1px solid #26305e; padding-bottom:4px;}
+    label {display:block; margin-top:10px; font-weight:600;}
+    input {width:100%; padding:8px; border-radius:8px; border:1px solid #2a366f; background:#0d1430; color:#e8eeff;}
+    .grid {display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px;}
+    button {background:#7aa2ff; border:none; color:#0b1020; padding:10px 16px; font-weight:bold; border-radius:10px; cursor:pointer; margin-top:16px;}
+    .result {margin-top:12px; background:#1a2042; padding:10px; border-radius:8px;}
+    .muted {color:#9fb0d0; font-size:13px;}
+    .output {font-size:16px; font-weight:600; color:#aee7ff;}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Marine Bunker Sounding & Density Calculator</h1>
+
+    <h2>1. Trim Correction Interpolation</h2>
+    <div class="grid">
+      <div><label>Sounding 1 (cm)</label><input id="s1" type="number" step="0.001" value="2920"></div>
+      <div><label>Sounding 2 (cm)</label><input id="s2" type="number" step="0.001" value="2970"></div>
+      <div><label>Trim (target)</label><input id="trim" type="number" step="0.01" value="0.29"></div>
+    </div>
+    <div class="grid">
+      <div><label>Volume @ Trim 0</label><input id="v0" type="number" step="0.001" value="60.4"></div>
+      <div><label>Volume @ Trim mid</label><input id="vMid" type="number" step="0.001" value="58.776"></div>
+      <div><label>Volume @ Trim 1</label><input id="v1" type="number" step="0.001" value="54.8"></div>
+    </div>
+    <button id="calcTrim">Calculate Trim Correction</button>
+    <div class="result">
+      <div class="output">Interpolated Volume: <span id="outTrimVol">–</span> m³</div>
+    </div>
+
+    <h2>2. Bunkers Densities Mixture</h2>
+    <div class="grid">
+      <div><label>Density (New)</label><input id="dNew" type="number" step="0.0001" value="0.8997"></div>
+      <div><label>Volume (New)</label><input id="vNew" type="number" step="0.001" value="44"></div>
+      <div><label>Density (Old)</label><input id="dOld" type="number" step="0.0001" value="0.8474"></div>
+      <div><label>Volume (Old)</label><input id="vOld" type="number" step="0.001" value="8"></div>
+    </div>
+    <button id="calcMix">Calculate New Density</button>
+    <div class="result">
+      <div class="output">Mixture Density: <span id="outMix">–</span> t/m³</div>
+    </div>
+
+    <h2>3. Density Transfer to 15°C</h2>
+    <div class="grid">
+      <div><label>Present Temperature (°C)</label><input id="tPres" type="number" step="0.1" value="20"></div>
+      <div><label>Required Temperature (°C)</label><input id="tReq" type="number" step="0.1" value="15"></div>
+      <div><label>Density @ Present Temp</label><input id="dPres" type="number" step="0.0001" value="0.9958"></div>
+      <div><label>Alpha Coefficient (per °C)</label><input id="alpha" type="number" step="0.00001" value="0.00064"></div>
+    </div>
+    <button id="calcDensity15">Calculate Density @15°C</button>
+    <div class="result">
+      <div class="output">Density @15°C: <span id="outD15">–</span> t/m³</div>
+    </div>
+
+    <h2>4. Final Weight Calculation</h2>
+    <div class="grid">
+      <div><label>Volume (m³)</label><input id="volFinal" type="number" step="0.001" placeholder="From Trim Result"></div>
+      <div><label>Density @15°C (t/m³)</label><input id="densFinal" type="number" step="0.0001" placeholder="From Section 3"></div>
+    </div>
+    <button id="calcWeight">Calculate Weight</button>
+    <div class="result">
+      <div class="output">Weight: <span id="outWeight">–</span> metric tons</div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (s)=>document.querySelector(s);
+
+    // Trim Correction Interpolation (linear for trim 0→mid→1)
+    $('#calcTrim').onclick=()=>{
+      const trim=parseFloat($('#trim').value)||0;
+      const v0=parseFloat($('#v0').value)||0;
+      const vMid=parseFloat($('#vMid').value)||0;
+      const v1=parseFloat($('#v1').value)||0;
+      let interpVol;
+      if(trim<=0.5){interpVol=v0+(vMid-v0)*(trim/0.5);} else {interpVol=vMid+(v1-vMid)*((trim-0.5)/0.5);} 
+      $('#outTrimVol').textContent=interpVol.toFixed(3);
+      $('#volFinal').value=interpVol.toFixed(3);
+    };
+
+    // Density mixture
+    $('#calcMix').onclick=()=>{
+      const dN=parseFloat($('#dNew').value)||0; const vN=parseFloat($('#vNew').value)||0;
+      const dO=parseFloat($('#dOld').value)||0; const vO=parseFloat($('#vOld').value)||0;
+      const res=((dN*vN)+(dO*vO))/(vN+vO);
+      $('#outMix').textContent=res.toFixed(4);
+      $('#densFinal').value=res.toFixed(4);
+    };
+
+    // Density correction to 15°C
+    $('#calcDensity15').onclick=()=>{
+      const tP=parseFloat($('#tPres').value)||0; const tR=parseFloat($('#tReq').value)||15;
+      const dP=parseFloat($('#dPres').value)||0; const alpha=parseFloat($('#alpha').value)||0.00064;
+      const diff=tR-tP;
+      const d15=dP*(1+alpha*diff);
+      $('#outD15').textContent=d15.toFixed(4);
+      $('#densFinal').value=d15.toFixed(4);
+    };
+
+    // Weight calculation
+    $('#calcWeight').onclick=()=>{
+      const v=parseFloat($('#volFinal').value)||0; const d=parseFloat($('#densFinal').value)||0;
+      const w=v*d; $('#outWeight').textContent=w.toFixed(3);
+    };
+  </script>
+</body>
+</html>
