@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Marine Condition Photo Logger v2</title>
+<title>Marine Condition Photo Logger v3</title>
 <style>
   body {font-family: system-ui, sans-serif; background:#0b1020; color:#e8eeff; margin:0; padding:0;}
   .container {max-width:800px; margin:20px auto; background:#121832; padding:20px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,0.4);}
@@ -21,7 +21,7 @@
 <body>
 <div class="container">
   <h1>Marine Condition Photo Logger</h1>
-  <p class="muted">Capture and tag photos directly from your phone. Works offline. Export as ZIP or share directly to Teams/WhatsApp.</p>
+  <p class="muted">Capture and tag photos directly from your phone. Works offline. Exports ZIP files compatible with Microsoft Teams and other apps.</p>
 
   <div class="grid">
     <div>
@@ -38,7 +38,7 @@
 
   <hr style="margin:20px 0;border-color:#26305e;">
   <div class="grid">
-    <button id="shareZip">📤 Share ZIP</button>
+    <button id="shareZip">📤 Save & Share ZIP</button>
     <button id="downloadZip">💾 Download ZIP</button>
     <button id="clearAll" style="background:#ff6a6a;color:#fff;">🗑 Clear All</button>
   </div>
@@ -109,6 +109,7 @@
     return await zip.generateAsync({ type: 'blob' });
   }
 
+  // Download ZIP normally
   document.getElementById('downloadZip').onclick = async () => {
     const blob = await makeZipBlob();
     if (!blob) return;
@@ -120,29 +121,36 @@
     status.textContent = 'ZIP downloaded ✅';
   };
 
+  // Save ZIP to real device storage and then share
   document.getElementById('shareZip').onclick = async () => {
     const blob = await makeZipBlob();
     if (!blob) return;
-    const file = new File([blob], 'condition_photos.zip', { type: 'application/zip' });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    if ('showSaveFilePicker' in window) {
       try {
-        await navigator.share({
-          files: [file],
-          title: 'Condition Photos',
-          text: 'Tagged condition photos from marine survey.'
+        const handle = await showSaveFilePicker({
+          suggestedName: 'condition_photos.zip',
+          types: [{ description: 'ZIP file', accept: { 'application/zip': ['.zip'] } }]
         });
-        status.textContent = 'Shared successfully ✅';
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        const file = await handle.getFile();
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            files: [file],
+            title: 'Condition Photos',
+            text: 'Tagged condition photos from marine survey.'
+          });
+          status.textContent = 'Shared successfully ✅';
+        } else {
+          status.textContent = 'Sharing not supported — file saved locally.';
+        }
       } catch (err) {
         console.warn(err);
-        status.textContent = 'Share canceled or failed.';
+        status.textContent = 'Save/Share canceled or failed.';
       }
     } else {
-      status.textContent = 'Sharing not supported on this device. Use Download ZIP instead.';
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'condition_photos.zip';
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      status.textContent = 'Direct save not supported. Use Download ZIP instead.';
     }
   };
 
