@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Marine Condition Photo Logger</title>
+<title>Marine Condition Photo Logger v2</title>
 <style>
   body {font-family: system-ui, sans-serif; background:#0b1020; color:#e8eeff; margin:0; padding:0;}
   .container {max-width:800px; margin:20px auto; background:#121832; padding:20px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,0.4);}
@@ -13,15 +13,15 @@
   button {background:#7aa2ff; color:#0b1020; font-weight:bold; cursor:pointer;}
   button:disabled {opacity:0.6;}
   .tag-group {margin-top:20px; background:#1a2042; padding:12px; border-radius:10px;}
-  .thumbs {display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:8px; margin-top:10px;}
-  .thumb img {width:100%; border-radius:6px; border:1px solid #22305e;}
+  .thumbs {display:flex; overflow-x:auto; gap:6px; padding:4px 0; scroll-snap-type:x mandatory;}
+  .thumbs img {height:70px; width:auto; border-radius:6px; border:1px solid #22305e; scroll-snap-align:start;}
   .muted {color:#9fb0d0; font-size:13px;}
 </style>
 </head>
 <body>
 <div class="container">
   <h1>Marine Condition Photo Logger</h1>
-  <p class="muted">Take tagged photos directly from your device. Works offline. All photos can be downloaded as a ZIP, grouped by tag.</p>
+  <p class="muted">Capture and tag photos directly from your phone. Works offline. Export as ZIP or share directly to Teams/WhatsApp.</p>
 
   <div class="grid">
     <div>
@@ -37,8 +37,11 @@
   <div id="tagList"></div>
 
   <hr style="margin:20px 0;border-color:#26305e;">
-  <button id="downloadZip">Download All as ZIP</button>
-  <button id="clearAll" style="background:#ff6a6a;color:#fff;">Clear All Photos</button>
+  <div class="grid">
+    <button id="shareZip">📤 Share ZIP</button>
+    <button id="downloadZip">💾 Download ZIP</button>
+    <button id="clearAll" style="background:#ff6a6a;color:#fff;">🗑 Clear All</button>
+  </div>
   <div id="status" class="muted" style="margin-top:10px;">Ready.</div>
 </div>
 
@@ -92,8 +95,8 @@
     e.target.value = '';
   }
 
-  document.getElementById('downloadZip').onclick = async () => {
-    if (Object.keys(tags).length === 0) return alert('No photos to download.');
+  async function makeZipBlob() {
+    if (Object.keys(tags).length === 0) { alert('No photos to export.'); return null; }
     const zip = new JSZip();
     for (const [tag, photos] of Object.entries(tags)) {
       const folder = zip.folder(tag);
@@ -102,13 +105,45 @@
         folder.file(photo.name, base64, { base64: true });
       }
     }
-    const blob = await zip.generateAsync({ type: 'blob' });
+    status.textContent = 'Generating ZIP...';
+    return await zip.generateAsync({ type: 'blob' });
+  }
+
+  document.getElementById('downloadZip').onclick = async () => {
+    const blob = await makeZipBlob();
+    if (!blob) return;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = 'condition_photos.zip';
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     status.textContent = 'ZIP downloaded ✅';
+  };
+
+  document.getElementById('shareZip').onclick = async () => {
+    const blob = await makeZipBlob();
+    if (!blob) return;
+    const file = new File([blob], 'condition_photos.zip', { type: 'application/zip' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: 'Condition Photos',
+          text: 'Tagged condition photos from marine survey.'
+        });
+        status.textContent = 'Shared successfully ✅';
+      } catch (err) {
+        console.warn(err);
+        status.textContent = 'Share canceled or failed.';
+      }
+    } else {
+      status.textContent = 'Sharing not supported on this device. Use Download ZIP instead.';
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'condition_photos.zip';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }
   };
 
   document.getElementById('clearAll').onclick = () => {
