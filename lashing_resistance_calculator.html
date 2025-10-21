@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lashing Resistance Calculator v2</title>
+<title>Lashing Resistance Calculator v3</title>
 <style>
   body {font-family: system-ui, sans-serif; background:#0b1020; color:#e8eeff; margin:0; padding:0;}
   .container {max-width:700px; margin:20px auto; background:#121832; padding:20px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,0.4);}
@@ -19,7 +19,7 @@
 <body>
 <div class="container">
   <h1>Lashing Resistance Calculator</h1>
-  <p class="muted">Calculate and visualize the effective resistance and geometry of lashings.</p>
+  <p class="muted">Calculate and visualize the geometry and resistance of lashings.</p>
 
   <label>Lashing Type</label>
   <select id="type">
@@ -37,8 +37,8 @@
   <label>Angle to Cargo (°)</label>
   <input id="angleCargo" type="number" placeholder="e.g. 10">
 
-  <label>Number of Lashings</label>
-  <input id="num" type="number" placeholder="e.g. 4">
+  <label>Number of Lashings (each side)</label>
+  <input id="num" type="number" placeholder="e.g. 2">
 
   <label>Load Type</label>
   <select id="loadType">
@@ -49,9 +49,9 @@
   <label>Standard Tension Force STF (if friction-based, daN)</label>
   <input id="stf" type="number" placeholder="e.g. 500">
 
-  <button id="calc">Calculate Resistance</button>
+  <button id="calc">Calculate & Visualize</button>
 
-  <canvas id="diagram" width="600" height="350"></canvas>
+  <canvas id="diagram" width="600" height="400"></canvas>
 
   <div id="result" class="result" style="display:none;"></div>
 </div>
@@ -60,66 +60,76 @@
 const canvas = document.getElementById('diagram');
 const ctx = canvas.getContext('2d');
 
-function drawLashings(angleDeck, angleCargo, num) {
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  
-  const centerX = canvas.width/2;
-  const baseY = canvas.height - 50;
-  const cargoWidth = 180;
-  const cargoHeight = 100;
+function drawScene(angleDeck, angleCargo, num) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const w = canvas.width;
+  const h = canvas.height;
+  const baseY = h - 50;
+  const cargoW = 200;
+  const cargoH = 100;
+  const cargoX = w / 2 - cargoW / 2;
+  const cargoY = baseY - cargoH;
 
-  // Draw deck
-  ctx.strokeStyle = '#6a7aff';
-  ctx.lineWidth = 3;
+  // Deck line
+  ctx.strokeStyle = "#6a7aff";
+  ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(50, baseY);
-  ctx.lineTo(canvas.width - 50, baseY);
+  ctx.lineTo(w - 50, baseY);
   ctx.stroke();
 
-  // Draw cargo block
-  const cargoX = centerX - cargoWidth/2;
-  const cargoY = baseY - cargoHeight;
-  ctx.fillStyle = '#2b3d77';
-  ctx.fillRect(cargoX, cargoY, cargoWidth, cargoHeight);
-  ctx.strokeStyle = '#aab8ff';
-  ctx.strokeRect(cargoX, cargoY, cargoWidth, cargoHeight);
+  // Cargo
+  ctx.fillStyle = "#2b3d77";
+  ctx.fillRect(cargoX, cargoY, cargoW, cargoH);
+  ctx.strokeStyle = "#aab8ff";
+  ctx.strokeRect(cargoX, cargoY, cargoW, cargoH);
 
-  // Draw lashings
-  const spacing = cargoWidth / (num + 1);
-  const deckRad = angleDeck * Math.PI / 180;
-  const cargoRad = angleCargo * Math.PI / 180;
+  // Draw lashings on both sides
+  const spacing = cargoH / (num + 1);
+  const lashLen = 140;
+  const rad = angleDeck * Math.PI / 180;
 
-  ctx.strokeStyle = '#ffb347';
+  ctx.strokeStyle = "#ffb347";
   ctx.lineWidth = 3;
   for (let i = 1; i <= num; i++) {
-    const attachX = cargoX + spacing * i;
-    const attachY = cargoY;
-    const lashLength = 130;
+    const attachY = cargoY + spacing * i;
 
-    // Calculate endpoint based on angle
-    const endX = attachX - lashLength * Math.cos(deckRad);
-    const endY = attachY + lashLength * Math.sin(deckRad);
+    // Port side
+    const startXPort = cargoX;
+    const startYPort = attachY;
+    const endXPort = startXPort - lashLen * Math.cos(rad);
+    const endYPort = startYPort + lashLen * Math.sin(rad);
+    drawArrow(startXPort, startYPort, endXPort, endYPort, "orange");
 
-    ctx.beginPath();
-    ctx.moveTo(attachX, attachY);
-    ctx.lineTo(endX, endY);
-    ctx.stroke();
-
-    // Arrow head
-    const angle = Math.atan2(endY - attachY, endX - attachX);
-    ctx.beginPath();
-    ctx.moveTo(endX, endY);
-    ctx.lineTo(endX + 10 * Math.cos(angle - Math.PI/6), endY + 10 * Math.sin(angle - Math.PI/6));
-    ctx.moveTo(endX, endY);
-    ctx.lineTo(endX + 10 * Math.cos(angle + Math.PI/6), endY + 10 * Math.sin(angle + Math.PI/6));
-    ctx.stroke();
+    // Starboard side
+    const startXStbd = cargoX + cargoW;
+    const startYStbd = attachY;
+    const endXStbd = startXStbd + lashLen * Math.cos(rad);
+    const endYStbd = startYStbd + lashLen * Math.sin(rad);
+    drawArrow(startXStbd, startYStbd, endXStbd, endYStbd, "orange");
   }
 
-  // Label angles
-  ctx.fillStyle = '#9fb0d0';
-  ctx.font = '13px sans-serif';
+  // Angle labels
+  ctx.fillStyle = "#9fb0d0";
+  ctx.font = "13px sans-serif";
   ctx.fillText(`Angle to deck: ${angleDeck.toFixed(1)}°`, 60, 30);
   ctx.fillText(`Angle to cargo: ${angleCargo.toFixed(1)}°`, 60, 50);
+}
+
+function drawArrow(x1, y1, x2, y2, color) {
+  ctx.strokeStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+
+  const angle = Math.atan2(y2 - y1, x2 - x1);
+  ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(x2 - 10 * Math.cos(angle - Math.PI / 6), y2 - 10 * Math.sin(angle - Math.PI / 6));
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(x2 - 10 * Math.cos(angle + Math.PI / 6), y2 - 10 * Math.sin(angle + Math.PI / 6));
+  ctx.stroke();
 }
 
 document.getElementById('calc').onclick = () => {
@@ -136,12 +146,12 @@ document.getElementById('calc').onclick = () => {
     return;
   }
 
-  drawLashings(angleDeck, angleCargo, num);
+  drawScene(angleDeck, angleCargo, num);
 
   let F_effective = 0;
   let detail = "";
 
-  if (loadType === 'direct') {
+  if (loadType === "direct") {
     const Fx = LC * Math.cos(angleDeck * Math.PI / 180) * Math.cos(angleCargo * Math.PI / 180);
     const Fy = LC * Math.sin(angleDeck * Math.PI / 180);
     F_effective = 2 * Fx;
@@ -153,15 +163,15 @@ document.getElementById('calc').onclick = () => {
     detail = `Using friction model μ=0.3 → ${Ff.toFixed(1)} daN per lashing`;
   }
 
-  const total = F_effective * num;
+  const total = F_effective * num * 2; // both sides
   const kN = (total / 100).toFixed(2);
 
-  document.getElementById('result').style.display = 'block';
-  document.getElementById('result').innerHTML = `
+  document.getElementById("result").style.display = "block";
+  document.getElementById("result").innerHTML = `
     <h3>Result</h3>
     <p>${detail}</p>
-    <p><strong>Total Resistance: ${total.toFixed(1)} daN (${kN} kN)</strong></p>
-    <p class="muted">Lashing type: ${type}, ${num} lashings used.</p>
+    <p><strong>Total Resistance (both sides): ${total.toFixed(1)} daN (${kN} kN)</strong></p>
+    <p class="muted">Type: ${type}, ${num} lashings per side.</p>
   `;
 };
 </script>
