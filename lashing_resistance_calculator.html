@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lashing Resistance Calculator</title>
+<style>
+  body {font-family: system-ui, sans-serif; background:#0b1020; color:#e8eeff; margin:0; padding:0;}
+  .container {max-width:600px; margin:20px auto; background:#121832; padding:20px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,0.4);}
+  h1 {color:#7aa2ff; margin-bottom:10px;}
+  label {display:block; margin-top:10px; color:#b4c3ff;}
+  input, select, button {width:100%; padding:8px; border-radius:8px; border:1px solid #2a366f; background:#0d1430; color:#e8eeff;}
+  button {background:#7aa2ff; color:#0b1020; font-weight:bold; cursor:pointer; margin-top:15px;}
+  .result {margin-top:20px; background:#1a2042; padding:12px; border-radius:10px;}
+  .muted {color:#9fb0d0; font-size:13px;}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Lashing Resistance Calculator</h1>
+  <p class="muted">Calculate effective resistance of straps or lashings based on angle and configuration.</p>
+
+  <label>Lashing Type</label>
+  <select id="type">
+    <option value="webbing">Webbing Strap</option>
+    <option value="chain">Chain</option>
+    <option value="wire">Wire Rope</option>
+  </select>
+
+  <label>Lashing Capacity (LC)</label>
+  <input id="lc" type="number" placeholder="e.g. 2500 (daN)">
+
+  <label>Angle to Deck (°)</label>
+  <input id="angleDeck" type="number" placeholder="e.g. 45">
+
+  <label>Angle to Cargo (°)</label>
+  <input id="angleCargo" type="number" placeholder="e.g. 10">
+
+  <label>Number of Lashings</label>
+  <input id="num" type="number" placeholder="e.g. 4">
+
+  <label>Load Type</label>
+  <select id="loadType">
+    <option value="direct">Direct (2 × LC × cosθ)</option>
+    <option value="friction">Friction (STF-based)</option>
+  </select>
+
+  <label>Standard Tension Force STF (if friction-based, daN)</label>
+  <input id="stf" type="number" placeholder="e.g. 500">
+
+  <button id="calc">Calculate Resistance</button>
+
+  <div id="result" class="result" style="display:none;"></div>
+</div>
+
+<script>
+document.getElementById('calc').onclick = () => {
+  const type = document.getElementById('type').value;
+  const LC = parseFloat(document.getElementById('lc').value);
+  const angleDeck = parseFloat(document.getElementById('angleDeck').value) * Math.PI / 180;
+  const angleCargo = parseFloat(document.getElementById('angleCargo').value) * Math.PI / 180;
+  const num = parseInt(document.getElementById('num').value);
+  const loadType = document.getElementById('loadType').value;
+  const STF = parseFloat(document.getElementById('stf').value) || 0;
+
+  if (!LC || !angleDeck || !num) {
+    alert('Please fill LC, angle and number of lashings.');
+    return;
+  }
+
+  let F_effective = 0;
+  let detail = "";
+
+  if (loadType === 'direct') {
+    // For direct lashings (e.g., chains, webbing in direct tension)
+    // Effective component depends on angle to deck (θ) and to cargo (φ)
+    const Fx = LC * Math.cos(angleDeck) * Math.cos(angleCargo);
+    const Fy = LC * Math.sin(angleDeck);
+    F_effective = 2 * Fx; // both directions of lashing
+    detail = `Horizontal component: ${Fx.toFixed(1)} daN<br>Vertical component: ${Fy.toFixed(1)} daN`;
+  } else {
+    // Friction-based lashings use STF
+    const mu = 0.3; // assumed friction coefficient
+    const Ff = 2 * STF * Math.cos(angleDeck) * mu;
+    F_effective = Ff;
+    detail = `Using friction model μ=0.3 → ${Ff.toFixed(1)} daN per lashing`;
+  }
+
+  const total = F_effective * num;
+  const kN = (total / 100).toFixed(2);
+
+  document.getElementById('result').style.display = 'block';
+  document.getElementById('result').innerHTML = `
+    <h3>Result</h3>
+    <p>${detail}</p>
+    <p><strong>Total Resistance: ${total.toFixed(1)} daN (${kN} kN)</strong></p>
+    <p class="muted">Lashing type: ${type}, ${num} lashings used.</p>
+  `;
+};
+</script>
+</body>
+</html>
