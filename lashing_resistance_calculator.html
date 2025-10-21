@@ -3,177 +3,118 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lashing Resistance Calculator v3</title>
+<title>Lashing Resistance Calculator 3D</title>
 <style>
-  body {font-family: system-ui, sans-serif; background:#0b1020; color:#e8eeff; margin:0; padding:0;}
-  .container {max-width:700px; margin:20px auto; background:#121832; padding:20px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,0.4);}
-  h1 {color:#7aa2ff;}
-  label {display:block; margin-top:10px; color:#b4c3ff;}
-  input, select, button {width:100%; padding:8px; border-radius:8px; border:1px solid #2a366f; background:#0d1430; color:#e8eeff;}
-  button {background:#7aa2ff; color:#0b1020; font-weight:bold; cursor:pointer; margin-top:15px;}
-  canvas {background:#0b0f25; border:1px solid #2a366f; border-radius:10px; margin-top:20px; width:100%; max-width:100%;}
-  .result {margin-top:20px; background:#1a2042; padding:12px; border-radius:10px;}
-  .muted {color:#9fb0d0; font-size:13px;}
+  body {margin:0; background:#0b1020; color:#e8eeff; font-family:system-ui,sans-serif;}
+  .ui {position:fixed; top:10px; left:10px; background:#121832cc; padding:12px; border-radius:10px; max-width:260px;}
+  label {display:block; margin-top:8px; color:#b4c3ff;}
+  input,select,button {width:100%; padding:6px; border-radius:6px; border:1px solid #2a366f; background:#0d1430; color:#e8eeff;}
+  button {background:#7aa2ff; color:#0b1020; font-weight:bold; cursor:pointer; margin-top:10px;}
+  #render {width:100vw; height:100vh; display:block;}
 </style>
 </head>
 <body>
-<div class="container">
-  <h1>Lashing Resistance Calculator</h1>
-  <p class="muted">Calculate and visualize the geometry and resistance of lashings.</p>
-
-  <label>Lashing Type</label>
-  <select id="type">
-    <option value="webbing">Webbing Strap</option>
-    <option value="chain">Chain</option>
-    <option value="wire">Wire Rope</option>
-  </select>
-
-  <label>Lashing Capacity (LC)</label>
-  <input id="lc" type="number" placeholder="e.g. 2500 (daN)">
-
+<div class="ui">
+  <h3>Lashing Resistance 3D</h3>
   <label>Angle to Deck (°)</label>
-  <input id="angleDeck" type="number" placeholder="e.g. 45">
-
+  <input id="angleDeck" type="number" value="45">
   <label>Angle to Cargo (°)</label>
-  <input id="angleCargo" type="number" placeholder="e.g. 10">
-
-  <label>Number of Lashings (each side)</label>
-  <input id="num" type="number" placeholder="e.g. 2">
-
-  <label>Load Type</label>
-  <select id="loadType">
-    <option value="direct">Direct (2 × LC × cosθ)</option>
-    <option value="friction">Friction (STF-based)</option>
-  </select>
-
-  <label>Standard Tension Force STF (if friction-based, daN)</label>
-  <input id="stf" type="number" placeholder="e.g. 500">
-
-  <button id="calc">Calculate & Visualize</button>
-
-  <canvas id="diagram" width="600" height="400"></canvas>
-
-  <div id="result" class="result" style="display:none;"></div>
+  <input id="angleCargo" type="number" value="10">
+  <label>Lashings per side</label>
+  <input id="num" type="number" value="2">
+  <button id="update">Update View</button>
 </div>
+<canvas id="render"></canvas>
 
+<script src="https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.161.0/examples/js/controls/OrbitControls.min.js"></script>
 <script>
-const canvas = document.getElementById('diagram');
-const ctx = canvas.getContext('2d');
+let scene,camera,renderer,controls;
+const canvas=document.getElementById('render');
 
-function drawScene(angleDeck, angleCargo, num) {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  const w = canvas.width;
-  const h = canvas.height;
-  const baseY = h - 50;
-  const cargoW = 200;
-  const cargoH = 100;
-  const cargoX = w / 2 - cargoW / 2;
-  const cargoY = baseY - cargoH;
+init();
+drawLashings();
 
-  // Deck line
-  ctx.strokeStyle = "#6a7aff";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(50, baseY);
-  ctx.lineTo(w - 50, baseY);
-  ctx.stroke();
+function init(){
+  scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x0b1020);
+  camera=new THREE.PerspectiveCamera(55,window.innerWidth/window.innerHeight,1,1000);
+  camera.position.set(5,3,6);
 
-  // Cargo
-  ctx.fillStyle = "#2b3d77";
-  ctx.fillRect(cargoX, cargoY, cargoW, cargoH);
-  ctx.strokeStyle = "#aab8ff";
-  ctx.strokeRect(cargoX, cargoY, cargoW, cargoH);
+  renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+  renderer.setSize(window.innerWidth,window.innerHeight);
+  window.addEventListener('resize',()=>renderer.setSize(window.innerWidth,window.innerHeight));
 
-  // Draw lashings on both sides
-  const spacing = cargoH / (num + 1);
-  const lashLen = 140;
-  const rad = angleDeck * Math.PI / 180;
+  controls=new THREE.OrbitControls(camera,renderer.domElement);
+  controls.target.set(0,1,0);
+  controls.update();
 
-  ctx.strokeStyle = "#ffb347";
-  ctx.lineWidth = 3;
-  for (let i = 1; i <= num; i++) {
-    const attachY = cargoY + spacing * i;
+  // Light
+  const ambient=new THREE.AmbientLight(0xffffff,0.7);
+  scene.add(ambient);
+  const dir=new THREE.DirectionalLight(0xffffff,0.8);
+  dir.position.set(5,5,5);
+  scene.add(dir);
 
-    // Port side
-    const startXPort = cargoX;
-    const startYPort = attachY;
-    const endXPort = startXPort - lashLen * Math.cos(rad);
-    const endYPort = startYPort + lashLen * Math.sin(rad);
-    drawArrow(startXPort, startYPort, endXPort, endYPort, "orange");
+  // Deck
+  const deckGeom=new THREE.PlaneGeometry(20,10);
+  const deckMat=new THREE.MeshStandardMaterial({color:0x1a203f,side:THREE.DoubleSide});
+  const deck=new THREE.Mesh(deckGeom,deckMat);
+  deck.rotation.x=-Math.PI/2;
+  scene.add(deck);
 
-    // Starboard side
-    const startXStbd = cargoX + cargoW;
-    const startYStbd = attachY;
-    const endXStbd = startXStbd + lashLen * Math.cos(rad);
-    const endYStbd = startYStbd + lashLen * Math.sin(rad);
-    drawArrow(startXStbd, startYStbd, endXStbd, endYStbd, "orange");
-  }
+  // Cargo block
+  const cargoGeom=new THREE.BoxGeometry(2,1,2);
+  const cargoMat=new THREE.MeshStandardMaterial({color:0x2b3d77,metalness:0.1,roughness:0.8});
+  const cargo=new THREE.Mesh(cargoGeom,cargoMat);
+  cargo.position.set(0,0.5,0);
+  scene.add(cargo);
 
-  // Angle labels
-  ctx.fillStyle = "#9fb0d0";
-  ctx.font = "13px sans-serif";
-  ctx.fillText(`Angle to deck: ${angleDeck.toFixed(1)}°`, 60, 30);
-  ctx.fillText(`Angle to cargo: ${angleCargo.toFixed(1)}°`, 60, 50);
+  animate();
 }
 
-function drawArrow(x1, y1, x2, y2, color) {
-  ctx.strokeStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(x1, y1);
-  ctx.lineTo(x2, y2);
-  ctx.stroke();
-
-  const angle = Math.atan2(y2 - y1, x2 - x1);
-  ctx.beginPath();
-  ctx.moveTo(x2, y2);
-  ctx.lineTo(x2 - 10 * Math.cos(angle - Math.PI / 6), y2 - 10 * Math.sin(angle - Math.PI / 6));
-  ctx.moveTo(x2, y2);
-  ctx.lineTo(x2 - 10 * Math.cos(angle + Math.PI / 6), y2 - 10 * Math.sin(angle + Math.PI / 6));
-  ctx.stroke();
+function animate(){
+  requestAnimationFrame(animate);
+  renderer.render(scene,camera);
 }
 
-document.getElementById('calc').onclick = () => {
-  const type = document.getElementById('type').value;
-  const LC = parseFloat(document.getElementById('lc').value);
-  const angleDeck = parseFloat(document.getElementById('angleDeck').value);
-  const angleCargo = parseFloat(document.getElementById('angleCargo').value);
-  const num = parseInt(document.getElementById('num').value);
-  const loadType = document.getElementById('loadType').value;
-  const STF = parseFloat(document.getElementById('stf').value) || 0;
+function clearLashings(){
+  const remove=[];
+  scene.traverse(obj=>{
+    if(obj.userData && obj.userData.lashing) remove.push(obj);
+  });
+  remove.forEach(obj=>scene.remove(obj));
+}
 
-  if (!LC || !angleDeck || !num) {
-    alert('Please fill LC, angle and number of lashings.');
-    return;
+function drawLashings(){
+  clearLashings();
+  const angleDeck=parseFloat(document.getElementById('angleDeck').value)*Math.PI/180;
+  const angleCargo=parseFloat(document.getElementById('angleCargo').value)*Math.PI/180;
+  const num=parseInt(document.getElementById('num').value);
+  const cargoWidth=2, cargoHeight=1, cargoDepth=2;
+  const lashLen=2.5;
+
+  const spacing=cargoHeight/(num+1);
+  for(let i=1;i<=num;i++){
+    const y=0.5 - cargoHeight/2 + spacing*i;
+
+    // Port
+    addLashing(-cargoWidth/2, y, -cargoDepth/2, -lashLen*Math.cos(angleDeck), -lashLen*Math.sin(angleDeck), 0, 0xffb347);
+    // Starboard
+    addLashing(cargoWidth/2, y, -cargoDepth/2, lashLen*Math.cos(angleDeck), -lashLen*Math.sin(angleDeck), 0, 0xffb347);
   }
+}
 
-  drawScene(angleDeck, angleCargo, num);
+function addLashing(x,y,z,dx,dy,dz,color){
+  const mat=new THREE.LineBasicMaterial({color:color});
+  const points=[new THREE.Vector3(x,y,z), new THREE.Vector3(x+dx,y+dy,z+dz)];
+  const geom=new THREE.BufferGeometry().setFromPoints(points);
+  const line=new THREE.Line(geom,mat);
+  line.userData.lashing=true;
+  scene.add(line);
+}
 
-  let F_effective = 0;
-  let detail = "";
-
-  if (loadType === "direct") {
-    const Fx = LC * Math.cos(angleDeck * Math.PI / 180) * Math.cos(angleCargo * Math.PI / 180);
-    const Fy = LC * Math.sin(angleDeck * Math.PI / 180);
-    F_effective = 2 * Fx;
-    detail = `Horizontal component: ${Fx.toFixed(1)} daN<br>Vertical component: ${Fy.toFixed(1)} daN`;
-  } else {
-    const mu = 0.3;
-    const Ff = 2 * STF * Math.cos(angleDeck * Math.PI / 180) * mu;
-    F_effective = Ff;
-    detail = `Using friction model μ=0.3 → ${Ff.toFixed(1)} daN per lashing`;
-  }
-
-  const total = F_effective * num * 2; // both sides
-  const kN = (total / 100).toFixed(2);
-
-  document.getElementById("result").style.display = "block";
-  document.getElementById("result").innerHTML = `
-    <h3>Result</h3>
-    <p>${detail}</p>
-    <p><strong>Total Resistance (both sides): ${total.toFixed(1)} daN (${kN} kN)</strong></p>
-    <p class="muted">Type: ${type}, ${num} lashings per side.</p>
-  `;
-};
+document.getElementById('update').onclick=drawLashings;
 </script>
 </body>
 </html>
