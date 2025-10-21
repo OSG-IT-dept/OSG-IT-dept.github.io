@@ -3,15 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Marine Condition Photo Logger v3</title>
+<title>Marine Condition Photo Logger v5</title>
 <style>
   body {font-family: system-ui, sans-serif; background:#0b1020; color:#e8eeff; margin:0; padding:0;}
   .container {max-width:800px; margin:20px auto; background:#121832; padding:20px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,0.4);}
   h1 {color:#7aa2ff;}
   .grid {display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px;}
-  input, select, button {width:100%; padding:8px; border-radius:8px; border:1px solid #2a366f; background:#0d1430; color:#e8eeff;}
+  input, button {width:100%; padding:8px; border-radius:8px; border:1px solid #2a366f; background:#0d1430; color:#e8eeff;}
   button {background:#7aa2ff; color:#0b1020; font-weight:bold; cursor:pointer;}
-  button:disabled {opacity:0.6;}
   .tag-group {margin-top:20px; background:#1a2042; padding:12px; border-radius:10px;}
   .thumbs {display:flex; overflow-x:auto; gap:6px; padding:4px 0; scroll-snap-type:x mandatory;}
   .thumbs img {height:70px; width:auto; border-radius:6px; border:1px solid #22305e; scroll-snap-align:start;}
@@ -21,7 +20,7 @@
 <body>
 <div class="container">
   <h1>Marine Condition Photo Logger</h1>
-  <p class="muted">Capture and tag photos directly from your phone. Works offline. Exports ZIP files compatible with Microsoft Teams and other apps.</p>
+  <p class="muted">Capture, tag, and save survey photos directly to a structured folder (with log and ZIP). Works fully offline.</p>
 
   <div class="grid">
     <div>
@@ -38,8 +37,7 @@
 
   <hr style="margin:20px 0;border-color:#26305e;">
   <div class="grid">
-    <button id="shareZip">📤 Save & Share ZIP</button>
-    <button id="downloadZip">💾 Download ZIP</button>
+    <button id="saveFolder">📁 Save to Folder (Tagged)</button>
     <button id="clearAll" style="background:#ff6a6a;color:#fff;">🗑 Clear All</button>
   </div>
   <div id="status" class="muted" style="margin-top:10px;">Ready.</div>
@@ -95,64 +93,62 @@
     e.target.value = '';
   }
 
-  async function makeZipBlob() {
-    if (Object.keys(tags).length === 0) { alert('No photos to export.'); return null; }
-    const zip = new JSZip();
-    for (const [tag, photos] of Object.entries(tags)) {
-      const folder = zip.folder(tag);
-      for (const photo of photos) {
-        const base64 = photo.dataUrl.split(',')[1];
-        folder.file(photo.name, base64, { base64: true });
-      }
+  async function saveToFolder() {
+    if (Object.keys(tags).length === 0) {
+      alert('No photos to save.');
+      return;
     }
-    status.textContent = 'Generating ZIP...';
-    return await zip.generateAsync({ type: 'blob' });
+    if (!('showDirectoryPicker' in window)) {
+      alert('Saving to folder is not supported on this device. Use Chrome or Edge.');
+      return;
+    }
+
+    try {
+      const rootDir = await showDirectoryPicker();
+      const logEntries = [];
+      for (const [tag, photos] of Object.entries(tags)) {
+        const tagDir = await rootDir.getDirectoryHandle(tag, { create: true });
+        for (const photo of photos) {
+          const fileHandle = await tagDir.getFileHandle(photo.name, { create: true });
+          const writable = await fileHandle.createWritable();
+          const res = await fetch(photo.dataUrl);
+          const blob = await res.blob();
+          await writable.write(blob);
+          await writable.close();
+          logEntries.push(`${tag}/${photo.name}`);
+        }
+      }
+
+      // Create log.txt
+      const logFile = await rootDir.getFileHandle('log.txt', { create: true });
+      const logWritable = await logFile.createWritable();
+      await logWritable.write('Marine Condition Survey Log\n\n');
+      logEntries.forEach(line => logWritable.write(line + '\n'));
+      await logWritable.close();
+
+      // Create ZIP in same folder
+      const zip = new JSZip();
+      for (const [tag, photos] of Object.entries(tags)) {
+        const folder = zip.folder(tag);
+        for (const photo of photos) {
+          const base64 = photo.dataUrl.split(',')[1];
+          folder.file(photo.name, base64, { base64: true });
+        }
+      }
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const zipHandle = await rootDir.getFileHandle('condition_photos.zip', { create: true });
+      const zipWritable = await zipHandle.createWritable();
+      await zipWritable.write(blob);
+      await zipWritable.close();
+
+      status.textContent = 'Saved successfully ✅ Folder + ZIP created.';
+    } catch (err) {
+      console.error(err);
+      status.textContent = 'Error saving folder or ZIP.';
+    }
   }
 
-  // Download ZIP normally
-  document.getElementById('downloadZip').onclick = async () => {
-    const blob = await makeZipBlob();
-    if (!blob) return;
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'condition_photos.zip';
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-    status.textContent = 'ZIP downloaded ✅';
-  };
-
-  // Save ZIP to real device storage and then share
-  document.getElementById('shareZip').onclick = async () => {
-    const blob = await makeZipBlob();
-    if (!blob) return;
-    if ('showSaveFilePicker' in window) {
-      try {
-        const handle = await showSaveFilePicker({
-          suggestedName: 'condition_photos.zip',
-          types: [{ description: 'ZIP file', accept: { 'application/zip': ['.zip'] } }]
-        });
-        const writable = await handle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-        const file = await handle.getFile();
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({
-            files: [file],
-            title: 'Condition Photos',
-            text: 'Tagged condition photos from marine survey.'
-          });
-          status.textContent = 'Shared successfully ✅';
-        } else {
-          status.textContent = 'Sharing not supported — file saved locally.';
-        }
-      } catch (err) {
-        console.warn(err);
-        status.textContent = 'Save/Share canceled or failed.';
-      }
-    } else {
-      status.textContent = 'Direct save not supported. Use Download ZIP instead.';
-    }
-  };
+  document.getElementById('saveFolder').onclick = saveToFolder;
 
   document.getElementById('clearAll').onclick = () => {
     if (!confirm('This will remove all photos. Continue?')) return;
