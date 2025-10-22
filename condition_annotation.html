@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Marine Photo Report Composer</title>
+<title>Marine Photo Report Composer v6</title>
 <style>
   body {font-family: system-ui, sans-serif; background:#0b1020; color:#e8eeff; margin:0; padding:0;}
   .container {max-width:900px; margin:20px auto; background:#121832; padding:20px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,0.4);}
@@ -20,7 +20,7 @@
 <body>
 <div class="container">
   <h1>Marine Photo Report Composer</h1>
-  <p class="muted">Take or upload up to 5 photos, annotate them, add notes, and export as a professional PDF sheet ready to send via Teams.</p>
+  <p class="muted">Capture or upload up to 5 annotated photos, add notes, and save a Teams-compatible PDF directly to your device.</p>
 
   <div>
     <label>Job Title</label>
@@ -32,7 +32,7 @@
   <div id="photoList"></div>
 
   <hr style="margin:20px 0;border-color:#26305e;">
-  <button id="exportPDF">📄 Generate PDF Report</button>
+  <button id="savePDF">💾 Save PDF to Device (Teams Compatible)</button>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -46,6 +46,7 @@ const images = [];
 photoInput.addEventListener('change', e => {
   const files = Array.from(e.target.files).slice(0, MAX_PHOTOS);
   photoList.innerHTML = '';
+  images.length = 0;
   files.forEach((file, i) => createEditor(file, i + 1));
 });
 
@@ -99,10 +100,7 @@ function createEditor(file, index) {
       };
     });
 
-    const getXY = e => {
-      const {x, y} = getCanvasCoords(canvas, e.clientX, e.clientY);
-      return {x, y};
-    };
+    const getXY = e => getCanvasCoords(canvas, e.clientX, e.clientY);
 
     canvas.addEventListener('mousedown', e => { drawing = true; const p = getXY(e); startX=p.x; startY=p.y; });
     canvas.addEventListener('mouseup', e => endDraw(e));
@@ -165,7 +163,7 @@ function createEditor(file, index) {
   reader.readAsDataURL(file);
 }
 
-document.getElementById('exportPDF').onclick = async () => {
+document.getElementById('savePDF').onclick = async () => {
   if (images.length === 0) return alert("Please add photos first.");
   const doc = new jsPDF({orientation: 'portrait', unit: 'mm', format: 'a4'});
   const title = document.getElementById('jobTitle').value || 'Marine Photo Report';
@@ -190,7 +188,31 @@ document.getElementById('exportPDF').onclick = async () => {
     }
   });
 
-  doc.save(`${title.replace(/\s+/g, "_")}_Report.pdf`);
+  const pdfBlob = doc.output('blob', { type: 'application/pdf' });
+
+  if ('showSaveFilePicker' in window) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: `${title.replace(/\s+/g,'_')}_Report.pdf`,
+        types: [{ description: 'PDF File', accept: { 'application/pdf': ['.pdf'] } }]
+      });
+      const writable = await handle.createWritable();
+      await writable.write(pdfBlob);
+      await writable.close();
+      alert('✅ PDF saved successfully to device. You can now share it via Teams.');
+    } catch (err) {
+      console.warn(err);
+      alert('Save canceled or failed.');
+    }
+  } else {
+    // fallback for iOS or unsupported browsers
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(pdfBlob);
+    a.download = `${title.replace(/\s+/g,'_')}_Report.pdf`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    alert('PDF downloaded (fallback mode).');
+  }
 };
 </script>
 </body>
