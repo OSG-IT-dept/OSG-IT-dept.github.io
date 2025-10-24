@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Voyage Lashing Forces — 2D Simulator</title>
+<style>
+  :root { --bg:#0f1320; --panel:#141a2a; --ink:#e9eefb; --muted:#9fb0d0; --accent:#6ea8fe; }
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,"Helvetica Neue",Arial;}
+  #wrap{display:grid;grid-template-columns:320px 1fr;gap:0;height:100%;}
+  #panel{background:var(--panel);padding:14px 14px 10px 14px;border-right:1px solid #26304a;overflow:auto}
+  h1{font-size:16px;margin:0 0 8px 0;font-weight:600;color:#dfe8ff}
+  h2{font-size:13px;margin:14px 0 8px 0;color:#c9d6f5}
+  .row{display:flex;align-items:center;gap:8px;margin:6px 0}
+  label{font-size:12px;color:var(--muted);min-width:120px}
+  input[type="number"]{width:90px;background:#0d1220;color:#dfe8ff;border:1px solid #2b3550;border-radius:6px;padding:6px 8px}
+  input[type="range"]{width:100%}
+  button{background:#1b2540;border:1px solid #2b3a66;color:#e8f0ff;border-radius:8px;padding:8px 10px;font-size:12px;cursor:pointer}
+  button:active{transform:translateY(1px)}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#10172a;border:1px solid #24304e;color:#98a9cc;font-size:11px}
+  #canvas{display:block;width:100%;height:100%}
+  .hint{font-size:12px;color:#a7b6d8;line-height:1.4}
+  .kbd{background:#0a0f1c;border:1px solid #28324f;border-radius:4px;padding:1px 6px;font-size:11px}
+  .small{font-size:11px;color:#8ea2c7}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="panel">
+    <h1>Voyage Lashing Forces — 2D</h1>
+    <div class="btnrow" style="margin-bottom:8px">
+      <button id="playPause">Pause</button>
+      <button id="reset">Reset</button>
+      <button id="addStrap">Add Strap</button>
+    </div>
+
+    <h2>Vessel Roll</h2>
+    <div class="row">
+      <label for="amp">Amplitude (°)</label>
+      <input id="amp" type="range" min="0" max="25" step="0.5" value="12">
+      <span class="pill" id="amp_val">12°</span>
+    </div>
+    <div class="row">
+      <label for="period">Period (s)</label>
+      <input id="period" type="range" min="4" max="20" step="0.5" value="10">
+      <span class="pill" id="period_val">10 s</span>
+    </div>
+
+    <h2>Cargo</h2>
+    <div class="row">
+      <label>Mass (t)</label>
+      <input id="mass" type="number" min="1" max="500" step="1" value="40">
+      <span class="small">= 40,000 kg</span>
+    </div>
+    <div class="row">
+      <label>Friction μ</label>
+      <input id="mu" type="number" min="0" max="1" step="0.02" value="0.35">
+      <span class="small">steel-on-timber ~0.35</span>
+    </div>
+
+    <h2>Strap Defaults</h2>
+    <div class="row">
+      <label>Capacity (kN)</label>
+      <input id="cap" type="number" min="10" max="500" step="5" value="80">
+    </div>
+    <div class="row">
+      <label>Stiffness (kN/m)</label>
+      <input id="stiff" type="number" min="5" max="1000" step="5" value="180">
+    </div>
+    <div class="row">
+      <label>Slack (mm)</label>
+      <input id="slack" type="number" min="0" max="200" step="5" value="10">
+    </div>
+
+    <h2>Editing</h2>
+    <p class="hint">
+      Click a strap to select. Drag its endpoints to reposition.
+      Right-click a selected strap to delete.
+      Hold <span class="kbd">Shift</span> to snap angles to 15°.
+    </p>
+
+    <h2>Legend</h2>
+    <p class="hint">Strap color = utilization<br>
+      <span class="pill" style="background:#16351c;border-color:#2a5331;color:#a7efb5">≤ 60%</span>
+      <span class="pill" style="background:#3b3513;border-color:#66561f;color:#ffe59a">~80%</span>
+      <span class="pill" style="background:#4b1b21;border-color:#7e2c35;color:#ffb9c2">≥ 100%</span>
+    </p>
+  </div>
+
+  <canvas id="canvas"></canvas>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+
+  // UI elements
+  const ampRange = document.getElementById('amp');
+  const ampVal = document.getElementById('amp_val');
+  const periodRange = document.getElementById('period');
+  const periodVal = document.getElementById('period_val');
+  const massInput = document.getElementById('mass');
+  const muInput = document.getElementById('mu');
+  const capInput = document.getElementById('cap');
+  const stiffInput = document.getElementById('stiff');
+  const slackInput = document.getElementById('slack');
+  const btnPlayPause = document.getElementById('playPause');
+  const btnReset = document.getElementById('reset');
+  const btnAdd = document.getElementById('addStrap');
+
+  // Resize canvas to fill area
+  function fit() {
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * devicePixelRatio;
+    canvas.height = rect.height * devicePixelRatio;
+    ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  }
+  addEventListener('resize', fit, {passive:true});
+  fit();
+
+  // World / deck coordinates
+  const world = {
+    w: 1200, h: 700, // visual units (pixels)
+    gravity: 9.81,   // m/s²
+    pxPerMeter: 60   // scale: 60 px ≈ 1 m
+  };
+
+  // Cargo body (rigid rectangle, sliding only)
+  const cargo = {
+    w: 300, h: 180, // px (≈ 5m x 3m at 60 px/m)
+    x: 600, y: 460, // center position
+    vx: 0, vy: 0,
+    mass: 40000, // kg (updated from UI)
+    angle: 0,    // visual tilt to deck (we keep rect axis-aligned to deck)
+    selected: false
+  };
+
+  // Deck bounds (inner margin)
+  const bounds = { x: 60, y: 60, w: world.w-120, h: world.h-180 };
+
+  // Straps (springs). Each strap connects cargo point (in local offset) to a deck point (absolute).
+  /** Strap structure:
+   * {
+   *   local: {x,y},  // attachment on cargo (px, relative to cargo center)
+   *   deck:  {x,y},  // anchor on deck (px, absolute)
+   *   L0: number,    // rest length (m); set from current length + slack
+   *   k: number,     // stiffness (N/m)
+   *   cap: number,   // capacity (N)
+   *   enabled: true,
+   *   util: 0,       // computed utilization (0..>1)
+   *   sel: false     // selected for editing
+   * }
+   */
+  const straps = [];
+
+  // Helpers
+  const m2px = (m)=> m*world.pxPerMeter;
+  const px2m = (px)=> px/world.pxPerMeter;
+
+  // Default strap factory using UI defaults
+  function makeStrap(local, deckPt) {
+    const k = Number(stiffInput.value) * 1000; // kN/m -> N/m
+    const cap = Number(capInput.value) * 1000; // kN -> N
+    const slack_m = Number(slackInput.value) / 1000; // mm -> m
+
+    const pCargo = { x: cargo.x + local.x, y: cargo.y + local.y };
+    const dx = deckPt.x - pCargo.x;
+    const dy = deckPt.y - pCargo.y;
+    const Lpx = Math.hypot(dx, dy);
+    const Lm = px2m(Lpx);
+    const L0 = Lm + slack_m;
+
+    return { local:{...local}, deck:{...deckPt}, L0, k, cap, enabled:true, util:0, sel:false };
+  }
+
+  // Initial straps
+  function initStraps() {
+    straps.length = 0;
+    const offsetX = cargo.w*0.35, offsetY = cargo.h*0.35;
+    straps.push(makeStrap({x:+offsetX,y:-offsetY}, {x: bounds.x+40, y: bounds.y+bounds.h-40}));
+    straps.push(makeStrap({x:-offsetX,y:-offsetY}, {x: bounds.x+bounds.w-40, y: bounds.y+bounds.h-40}));
+    straps.push(makeStrap({x:0,y:+offsetY}, {x: cargo.x, y: bounds.y+40}));
+  }
+
+  // UI listeners
+  function syncLabels(){
+    ampVal.textContent = `${Number(ampRange.value).toFixed(1)}°`;
+    periodVal.textContent = `${Number(periodRange.value).toFixed(1)} s`;
+  }
+  ampRange.oninput = syncLabels;
+  periodRange.oninput = syncLabels;
+  syncLabels();
+
+  massInput.onchange = () => cargo.mass = Number(massInput.value) * 1000; // tonnes -> kg
+  cargo.mass = Number(massInput.value) * 1000;
+
+  btnPlayPause.onclick = () => {
+    playing = !playing;
+    btnPlayPause.textContent = playing ? 'Pause' : 'Play';
+  };
+  btnReset.onclick = () => resetSim();
+  btnAdd.onclick = () => {
+    const local = {x:0, y:0};
+    const deckPt = {x: cargo.x, y: cargo.y + cargo.h*0.8};
+    const s = makeStrap(local, deckPt);
+    s.sel = true;
+    straps.push(s);
+  };
+
+  // Mouse interaction
+  let mouse = {x:0,y:0,down:false,dragging:null, dragType:null, lastSel:null};
+  canvas.addEventListener('mousemove', e=>{
+    const r = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - r.left);
+    mouse.y = (e.clientY - r.top);
+    if(mouse.dragging){
+      if(mouse.dragType==='deck'){
+        // move deck anchor
+        mouse.dragging.deck.x = snapIfNeeded(mouse.x, e.shiftKey);
+        mouse.dragging.deck.y = snapIfNeeded(mouse.y, e.shiftKey);
+      }else if(mouse.dragType==='local'){
+        // move cargo local point (stick to cargo)
+        const lx = mouse.x - cargo.x;
+        const ly = mouse.y - cargo.y;
+        mouse.dragging.local.x = snapIfNeeded(clamp(lx,-cargo.w/2,cargo.w/2), e.shiftKey);
+        mouse.dragging.local.y = snapIfNeeded(clamp(ly,-cargo.h/2,cargo.h/2), e.shiftKey);
+      }
+    }
+  });
+  canvas.addEventListener('mousedown', e=>{
+    e.preventDefault();
+    mouse.down = true;
+
+    // hit-test handles first
+    const hit = pickHandle(mouse.x, mouse.y);
+    if(hit){
+      selectOnly(hit.strap);
+      mouse.dragging = hit.strap;
+      mouse.dragType = hit.part;
+      return;
+    }
+
+    // otherwise pick strap line (for selection)
+    const s = pickStrap(mouse.x, mouse.y);
+    if(s){
+      selectOnly(s);
+      mouse.lastSel = s;
+    } else {
+      selectOnly(null);
+    }
+  });
+  canvas.addEventListener('contextmenu', e=>{
+    e.preventDefault();
+    const s = straps.find(s=>s.sel);
+    if(s){
+      const idx = straps.indexOf(s);
+      if(idx>=0) straps.splice(idx,1);
+    }
+  });
+  addEventListener('mouseup', ()=>{ mouse.down=false; mouse.dragging=null; mouse.dragType=null; });
+
+  function snapIfNeeded(v, snap) {
+    if(!snap) return v;
+    // Snap the angle of vector from cargo center to 15° increments when moving local handle,
+    // or snap to 15° rays from the deck center when moving deck handle — keep simple:
+    return Math.round(v/10)*10; // position snap every 10 px (quick and practical)
+  }
+
+  function selectOnly(s){
+    straps.forEach(st=>st.sel=false);
+    if(s) s.sel = true;
+  }
+
+  function pickHandle(x,y){
+    // Return nearest handle within radius
+    const R = 10;
+    for(const s of straps){
+      const pCargo = {x: cargo.x + s.local.x, y: cargo.y + s.local.y};
+      if(dist2(x,y,pCargo.x,pCargo.y) < R*R) return {strap:s, part:'local'};
+      if(dist2(x,y,s.deck.x,s.deck.y) < R*R) return {strap:s, part:'deck'};
+    }
+    return null;
+  }
+
+  function pickStrap(x,y){
+    // pick by distance to segment
+    const TH = 6;
+    let best=null, bestd=1e9;
+    for(const s of straps){
+      const p = {x: cargo.x + s.local.x, y: cargo.y + s.local.y};
+      const d = pointToSegmentDist(x,y,p.x,p.y,s.deck.x,s.deck.y);
+      if(d<TH && d<bestd){ best=s; bestd=d; }
+    }
+    return best;
+  }
+
+  function dist2(x1,y1,x2,y2){ const dx=x1-x2, dy=y1-y2; return dx*dx+dy*dy; }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+  function pointToSegmentDist(x,y,x1,y1,x2,y2){
+    const vx=x2-x1, vy=y2-y1;
+    const wx=x-x1, wy=y-y1;
+    const c1 = vx*wx + vy*wy;
+    const c2 = vx*vx + vy*vy;
+    let t = c2 ? c1/c2 : 0;
+    t = Math.max(0,Math.min(1,t));
+    const px = x1 + t*vx, py = y1 + t*vy;
+    return Math.hypot(x-px, y-py);
+  }
+
+  // Physics integrator
+  let t0 = performance.now()/1000;
+  let playing = true;
+
+  function resetSim(){
+    cargo.x = world.w*0.5;
+    cargo.y = bounds.y + bounds.h - cargo.h*0.5 - 2;
+    cargo.vx = cargo.vy = 0;
+    initStraps();
+  }
+  initStraps();
+
+  function step(dt, now){
+    // Vessel roll: phi(t) in radians
+    const A = Number(ampRange.value) * Math.PI/180;    // amplitude
+    const T = Number(periodRange.value);               // period (s)
+    const phi = (T>0) ? (A * Math.sin(2*Math.PI*now/T)) : 0;
+
+    // Effective gravity vector (deck frame): gx = g*sin(phi), gy = g*cos(phi)
+    const gx = world.gravity * Math.sin(phi);
+    const gy = world.gravity * Math.cos(phi);
+
+    // Accumulated forces on cargo (N)
+    let Fx = 0, Fy = cargo.mass * gy * 0; // we confine vertical motion; Fy used only for diagnostics
+
+    // Friction model: static/kinetic against deck due to tilted gravity
+    // Normal force N ≈ m*gy (gy ≥ 0 always for |phi|≤90°)
+    const N = cargo.mass * Math.max(gy, 0);
+    const mu = Number(muInput.value);
+    const Fmax = mu * N;
+
+    // Horizontal "down-slope" force from tilted gravity
+    const Fdown = cargo.mass * gx;
+
+    // Spring (strap) forces
+    let worstUtil = 0;
+    for(const s of straps){
+      if(!s.enabled) continue;
+      const pCargo = {x: cargo.x + s.local.x, y: cargo.y + s.local.y};
+      const dx = s.deck.x - pCargo.x;
+      const dy = s.deck.y - pCargo.y;
+      const L = Math.hypot(dx, dy);
+      const nux = dx / (L || 1), nuy = dy / (L || 1);
+      const Lm = px2m(L);
+      const ext = Math.max(0, Lm - s.L0); // tension only (no compression)
+      const F = s.k * ext; // N
+      s.util = s.cap > 0 ? (F / s.cap) : 0;
+      worstUtil = Math.max(worstUtil, s.util || 0);
+
+      // apply to cargo (towards deck anchor)
+      Fx += F * nux;
+      // note: vertical component would be F * nuy; we keep cargo vertically constrained for simplicity
+    }
+
+    // Friction opposes motion+downslope. Use simple Coulomb with kinetic override.
+    // Desired net horizontal without friction:
+    let Fnet = Fx + Fdown;
+
+    // Static vs kinetic friction
+    const v = cargo.vx;
+    if(Math.abs(v) < 0.02 && Math.abs(Fnet) < Fmax){
+      // Static: cancel net
+      Fnet = 0;
+    }else{
+      // Kinetic: subtract in direction of velocity or downslope
+      const sign = (Math.abs(v) > 0.02) ? Math.sign(v) : Math.sign(Fnet);
+      Fnet -= Fmax * sign;
+    }
+
+    // Integrate (semi-implicit Euler)
+    const ax = Fnet / cargo.mass;
+    cargo.vx += ax * dt;
+    cargo.x  += cargo.vx * dt;
+
+    // Collision with side bounds (simple inelastic)
+    const left = cargo.x - cargo.w/2;
+    const right = cargo.x + cargo.w/2;
+    if(left < bounds.x){
+      cargo.x = bounds.x + cargo.w/2;
+      if(cargo.vx < 0) cargo.vx *= -0.2;
+    }
+    if(right > bounds.x + bounds.w){
+      cargo.x = bounds.x + bounds.w - cargo.w/2;
+      if(cargo.vx > 0) cargo.vx *= -0.2;
+    }
+
+    // Visual angle equals deck roll
+    cargo.angle = phi;
+
+    // Visual alarm if any strap > 100%
+    cargo.over = worstUtil > 1.0;
+
+    // Store for overlay
+    step.lastWorst = worstUtil;
+    step.rollDeg = (phi * 180/Math.PI);
+  }
+  step.lastWorst = 0;
+  step.rollDeg = 0;
+
+  function draw(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    // Sky/water background stripes
+    const g = ctx.createLinearGradient(0,0,0,canvas.height);
+    g.addColorStop(0,"#0d1223");
+    g.addColorStop(0.5,"#0b1220");
+    g.addColorStop(1,"#0a101b");
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    // Deck plate
+    ctx.save();
+    ctx.translate(bounds.x + bounds.w/2, bounds.y + bounds.h/2);
+    ctx.fillStyle = "#1a2136";
+    roundRect(ctx, -bounds.w/2, -bounds.h/2, bounds.w, bounds.h, 14);
+    ctx.fill();
+    ctx.restore();
+
+    // Cargo (rotated to deck roll for visuals; physics stays horizontal slide)
+    ctx.save();
+    ctx.translate(cargo.x, cargo.y);
+    ctx.rotate(cargo.angle);
+    ctx.fillStyle = cargo.over ? "#6b2a38" : "#2a3658";
+    roundRect(ctx, -cargo.w/2, -cargo.h/2, cargo.w, cargo.h, 10);
+    ctx.fill();
+    // Cargo hatch lines
+    ctx.strokeStyle = "rgba(220,230,255,0.08)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for(let x=-cargo.w/2+20; x<cargo.w/2; x+=20){ ctx.moveTo(x,-cargo.h/2); ctx.lineTo(x,cargo.h/2); }
+    ctx.stroke();
+    ctx.restore();
+
+    // Straps
+    for(const s of straps){
+      const p = {x: cargo.x + s.local.x, y: cargo.y + s.local.y};
+      const util = s.util || 0;
+      const col = utilColor(util);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = s.sel ? 4 : 3;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(s.deck.x, s.deck.y);
+      ctx.stroke();
+
+      // little ticks at ends
+      ctx.fillStyle = col;
+      drawHandle(p.x, p.y, s.sel);
+      drawHandle(s.deck.x, s.deck.y, s.sel);
+
+      // utilization label at midpoint
+      const mx = (p.x + s.deck.x)/2, my = (p.y + s.deck.y)/2;
+      const label = `${Math.min(util*100, 999).toFixed(0)}%`;
+      drawLabel(mx, my, label, col);
+    }
+
+    // Axes & overlay
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.font = "13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+    ctx.textBaseline = "top";
+
+    // Overlay: roll
+    const rtxt = `Roll: ${step.rollDeg.toFixed(1)}°`;
+    ctx.fillText(rtxt, 12, 38);
+
+    // Overlay: worst strap utilization
+    let worst=0; for (const s of straps) worst=Math.max(worst, s.util||0);
+    const label = `Max strap util: ${(worst*100).toFixed(0)}%`;
+    ctx.fillStyle = worst<=1? '#a8ffbd' : '#ffb3b3';
+    ctx.fillText(label, 12, 18);
+
+    // Ground line shadow under cargo
+    ctx.strokeStyle = "rgba(0,0,0,0.4)";
+    ctx.lineWidth = 12;
+    ctx.beginPath();
+    ctx.moveTo(bounds.x+8, bounds.y + bounds.h + 24);
+    ctx.lineTo(bounds.x+bounds.w-8, bounds.y + bounds.h + 24);
+    ctx.stroke();
+  }
+
+  function utilColor(u){
+    // 0 -> green, 1 -> red, with yellow mid
+    u = Math.max(0, Math.min(1.4, u)); // allow slight over to push into red
+    const t = Math.min(1, u);
+    // gradient: green (0,200,120) -> yellow (255,210,0) -> red (255,80,90)
+    let r,g,b;
+    if(t<0.7){
+      const k = t/0.7;
+      r = lerp(0,255,k);
+      g = lerp(200,210,k);
+      b = lerp(120,0,k);
+    }else{
+      const k = (t-0.7)/0.3;
+      r = lerp(255,255,k);
+      g = lerp(210,80,k);
+      b = lerp(0,90,k);
+    }
+    return `rgb(${r|0},${g|0},${b|0})`;
+  }
+  function lerp(a,b,t){ return a + (b-a)*t; }
+
+  function drawHandle(x,y,selected){
+    ctx.beginPath();
+    ctx.arc(x,y, selected?6:5, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.75)";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+  function drawLabel(x,y,text,strokeCol){
+    ctx.save();
+    ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+    const m = ctx.measureText(text);
+    const pad=4, w=m.width+pad*2, h=14;
+    ctx.translate(x,y-18);
+    ctx.fillStyle = "rgba(12,16,28,0.85)";
+    roundRect(ctx, -w/2, -h/2, w, h, 4);
+    ctx.fill();
+    ctx.strokeStyle = strokeCol;
+    ctx.lineWidth = 1;
+    roundRect(ctx, -w/2, -h/2, w, h, 4);
+    ctx.stroke();
+    ctx.fillStyle = "#e7efff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, 0, 1);
+    ctx.restore();
+  }
+  function roundRect(c,x,y,w,h,r){
+    c.beginPath();
+    c.moveTo(x+r,y);
+    c.arcTo(x+w,y,x+w,y+h,r);
+    c.arcTo(x+w,y+h,x,y+h,r);
+    c.arcTo(x,y+h,x,y,r);
+    c.arcTo(x,y,x+w,y,r);
+    c.closePath();
+  }
+
+  // Main loop with fixed dt for stability
+  let acc=0, last = performance.now()/1000;
+  function loop(nowms){
+    const now = nowms/1000;
+    let dt = now - last;
+    last = now;
+    if(dt>0.1) dt = 0.1;
+    acc += dt;
+    const h = 1/120; // 120 Hz physics
+    while(acc >= h){
+      if(playing) step(h, now);
+      acc -= h;
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // Initialize placement
+  function init() {
+    // Set bounds based on world to canvas ratio
+    // Already defined; just reset sim to place cargo nicely.
+    resetSim();
+  }
+  init();
+
+})();
+</script>
+</body>
+</html>
