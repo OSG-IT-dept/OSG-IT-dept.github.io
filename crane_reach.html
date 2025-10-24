@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Port Crane Reach → Docked Vessel (Plan View Simulator)</title>
+<style>
+  :root { --bg:#0f1220; --panel:#151a2e; --ink:#e8ecf6; --muted:#9aa3b2; --ok:#3ad29f; --no:#ff6b6b; --accent:#5aa9ff; }
+  html,body { height:100%; margin:0; background:var(--bg); color:var(--ink); font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif; }
+  header { padding:12px 18px; border-bottom:1px solid #233; background:linear-gradient(180deg,#101634,#0f1220); }
+  header h1 { font-size:18px; margin:0; letter-spacing:.2px; }
+  #wrap { display:flex; gap:12px; padding:12px; height:calc(100% - 58px); box-sizing:border-box; }
+  #left { flex: 0 0 360px; background:var(--panel); border:1px solid #222a45; border-radius:10px; padding:12px; overflow:auto; }
+  #right { flex:1; display:flex; flex-direction:column; gap:12px; }
+  #canvasWrap { flex:1; background:#0b0e1a; border:1px solid #222a45; border-radius:10px; position:relative; }
+  #canvas { width:100%; height:100%; display:block; }
+  fieldset { border:1px solid #223; border-radius:8px; margin:0 0 12px 0; }
+  legend { color:var(--muted); font-size:12px; padding:0 6px; }
+  .grid { display:grid; grid-template-columns: 1fr 90px; gap:6px 8px; padding:8px; }
+  label { font-size:12px; color:var(--muted); align-self:center; }
+  input, select, button, textarea {
+    background:#0c132a; border:1px solid #2a3358; color:var(--ink);
+    border-radius:6px; padding:6px 8px; font-size:13px;
+  }
+  input[type="number"] { text-align:right; }
+  button { cursor:pointer; }
+  .row { display:flex; gap:8px; }
+  .pill { display:inline-flex; gap:8px; align-items:center; background:#0e1530; border:1px solid #223; border-radius:999px; padding:6px 10px; font-size:12px; color:var(--muted); }
+  .stat { font-variant-numeric: tabular-nums; }
+  .ok { color:var(--ok); font-weight:600; }
+  .no { color:var(--no); font-weight:600; }
+  .help { font-size:12px; color:#8d94a6; padding:4px 8px 0; line-height:1.3; }
+  .bar { display:flex; gap:8px; align-items:center; justify-content:space-between; }
+  .mini { font-size:12px; color:var(--muted); }
+  textarea { width:100%; height:110px; resize:vertical; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Port Crane Reach Simulator — Plan View (quay ↔ vessel)</h1>
+</header>
+
+<div id="wrap">
+  <div id="left">
+    <div class="bar">
+      <div class="pill">Units: meters</div>
+      <div class="row">
+        <select id="preset">
+          <option value="">Presets…</option>
+          <option value="mhc">Mobile Harbor Crane + Handymax</option>
+          <option value="sts_pnmx">STS (Panamax) + Panamax</option>
+          <option value="sts_ppmx">STS (Post-Panamax) + Post-Panamax</option>
+        </select>
+        <button id="applyPreset">Apply</button>
+      </div>
+    </div>
+
+    <fieldset>
+      <legend>Crane (slewing) — base on quay</legend>
+      <div class="grid">
+        <label>Base X along quay</label><input id="cr_base_x" type="number" value="0" step="1">
+        <label>Base Y from quay edge (positive landside)</label><input id="cr_base_y" type="number" value="12" step="0.5">
+        <label>Min radius (backreach)</label><input id="cr_rmin" type="number" value="10" step="0.5">
+        <label>Max radius (outreach)</label><input id="cr_rmax" type="number" value="55" step="0.5">
+        <label>Slew min angle (°) [0°=+X; CCW +]</label><input id="cr_amin" type="number" value="210" step="1">
+        <label>Slew max angle (°)</label><input id="cr_amax" type="number" value="330" step="1">
+        <label>Hoist height clearance note</label><input id="cr_note" type="text" value="(plan view only)">
+      </div>
+      <div class="help">Tip: For quay edge at Y=0, the sea is at negative Y. Typical working sector faces the water (angles ~225°–315°).</div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Vessel (rectangle + fender gap)</legend>
+      <div class="grid">
+        <label>LOA (length overall)</label><input id="v_len" type="number" value="200" step="1">
+        <label>Beam</label><input id="v_beam" type="number" value="32" step="0.5">
+        <label>Center X (drag on canvas)</label><input id="v_cx" type="number" value="0" step="1">
+        <label>Center Y (drag on canvas)</label><input id="v_cy" type="number" value="-25" step="1">
+        <label>Fender gap (quay edge→hull)</label><input id="v_gap" type="number" value="2.5" step="0.1">
+      </div>
+      <div class="help">Ship’s starboard side lies roughly at Y = -(gap + beam/2). Move precisely by editing numbers or dragging.</div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Target point (pickup/drop, drag the purple ●)</legend>
+      <div class="grid">
+        <label>Target X</label><input id="t_x" type="number" value="10" step="0.5">
+        <label>Target Y</label><input id="t_y" type="number" value="-28" step="0.5">
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Scenario I/O</legend>
+      <div class="row">
+        <button id="save">Save → JSON</button>
+        <button id="load">Load ← JSON</button>
+      </div>
+      <div class="help mini">Copy JSON below to keep scenarios; paste then press “Load”.</div>
+      <textarea id="io"></textarea>
+    </fieldset>
+
+    <fieldset>
+      <legend>Status</legend>
+      <div class="grid">
+        <label>Distance base→target</label><div class="stat" id="statDist">—</div>
+        <label>Required angle</label><div class="stat" id="statAng">—</div>
+        <label>Within radius?</label><div class="stat" id="statR">—</div>
+        <label>Within slew?</label><div class="stat" id="statA">—</div>
+        <label>Inside vessel?</label><div class="stat" id="statInside">—</div>
+        <label>Reach result</label><div class="stat" id="statReach">—</div>
+      </div>
+    </fieldset>
+  </div>
+
+  <div id="right">
+    <div class="bar">
+      <div class="pill">Canvas: drag vessel (hull) & target point (●). Mouse wheel = zoom. Right-drag = pan.</div>
+      <div class="row">
+        <button id="fit">Fit to view</button>
+        <button id="recenter">Recenter</button>
+      </div>
+    </div>
+    <div id="canvasWrap"><canvas id="canvas"></canvas></div>
+    <div class="mini">Legend: Quay edge = bold line at Y=0. Water is below (−Y). Crane base = ◼. Working sector = light arc. Min/Max radius = dashed rings. Vessel = cyan rectangle. Target = purple ●. Green arm → feasible; red → not feasible.</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // --- World & view state ---
+  const state = {
+    // crane
+    cr:{ base:{x:0,y:12}, rmin:10, rmax:55, amin:210, amax:330 },
+    // vessel
+    v:{ len:200, beam:32, cx:0, cy:-25, gap:2.5 },
+    // target
+    t:{ x:10, y:-28 },
+    // view
+    view:{ zoom:6, ox:0, oy:0 }, // pixels per meter, and pan offsets (px)
+    dragging:null, dragOff:{x:0,y:0}, rightDragging:false, lastMouse:{x:0,y:0},
+  };
+
+  // --- Elements ---
+  const el = id => document.getElementById(id);
+  const canvas = el('canvas');
+  const wrap = el('canvasWrap');
+  const ctx = canvas.getContext('2d');
+
+  // --- Utilities ---
+  const toRad = d=>d*Math.PI/180;
+  const toDeg = r=>r*180/Math.PI;
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  const normDeg = a => ((a%360)+360)%360;
+  const pointDist = (a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
+
+  function worldToScreen(wx,wy){
+    const {zoom,ox,oy}=state.view;
+    return { x: wrap.clientWidth/2 + (wx*zoom)+ox, y: wrap.clientHeight/2 + (-wy*zoom)+oy };
+  }
+  function screenToWorld(sx,sy){
+    const {zoom,ox,oy}=state.view;
+    return { x: (sx - wrap.clientWidth/2 - ox)/zoom, y: - (sy - wrap.clientHeight/2 - oy)/zoom };
+  }
+
+  function setCanvasSize(){
+    const r=wrap.getBoundingClientRect();
+    canvas.width = Math.max(300, r.width);
+    canvas.height= Math.max(300, r.height);
+  }
+  window.addEventListener('resize', ()=>{ setCanvasSize(); draw(); });
+
+  // --- Inputs bind ---
+  const binds = [
+    ['cr_base_x','cr.base.x'],['cr_base_y','cr.base.y'],
+    ['cr_rmin','cr.rmin'],['cr_rmax','cr.rmax'],
+    ['cr_amin','cr.amin'],['cr_amax','cr.amax'],
+    ['v_len','v.len'],['v_beam','v.beam'],
+    ['v_cx','v.cx'],['v_cy','v.cy'],['v_gap','v.gap'],
+    ['t_x','t.x'],['t_y','t.y'],
+  ];
+  for(const [id,path] of binds){
+    el(id).addEventListener('input', e=>{
+      const v=parseFloat(e.target.value);
+      setPath(state, path, isFinite(v)?v:0);
+      draw();
+    });
+  }
+  el('applyPreset').onclick = ()=>{
+    const p = el('preset').value;
+    if(!p) return;
+    if(p==='mhc'){ // Mobile Harbor Crane + Handymax
+      Object.assign(state.cr,{ base:{x:0,y:15}, rmin:8, rmax:50, amin:190, amax:350 });
+      Object.assign(state.v,{ len:180, beam:28, cx:0, cy:-24, gap:2.0 });
+      Object.assign(state.t,{ x: 5, y: -26 });
+    } else if(p==='sts_pnmx'){ // STS Panamax approx as slewing sector
+      Object.assign(state.cr,{ base:{x:0,y:10}, rmin:15, rmax:38, amin:220, amax:320 });
+      Object.assign(state.v,{ len:230, beam:32, cx:0, cy:-23, gap:2.5 });
+      Object.assign(state.t,{ x: 8, y: -26 });
+    } else if(p==='sts_ppmx'){ // STS Post-Panamax approx
+      Object.assign(state.cr,{ base:{x:0,y:12}, rmin:18, rmax:48, amin:220, amax:320 });
+      Object.assign(state.v,{ len:290, beam:40, cx:0, cy:-27, gap:3.0 });
+      Object.assign(state.t,{ x: 10, y: -30 });
+    }
+    reflectInputs(); fitView(); draw();
+  };
+
+  function setPath(obj, path, val){
+    const parts=path.split('.');
+    let o=obj;
+    for(let i=0;i<parts.length-1;i++) o=o[parts[i]];
+    o[parts.at(-1)]=val;
+  }
+  function reflectInputs(){
+    const map = {
+      'cr_base_x':state.cr.base.x,'cr_base_y':state.cr.base.y,
+      'cr_rmin':state.cr.rmin,'cr_rmax':state.cr.rmax,
+      'cr_amin':state.cr.amin,'cr_amax':state.cr.amax,
+      'v_len':state.v.len,'v_beam':state.v.beam,
+      'v_cx':state.v.cx,'v_cy':state.v.cy,'v_gap':state.v.gap,
+      't_x':state.t.x,'t_y':state.t.y
+    };
+    for(const id in map) el(id).value = String(map[id]);
+  }
+
+  // --- Geometry helpers ---
+  function vesselRect(){
+    const {len,beam,cx,cy,gap}=state.v;
+    // Starboard side distance from quay edge (Y=0): -(gap + beam/2)
+    const halfL=len/2, halfB=beam/2;
+    return {
+      x1: cx - halfL, x2: cx + halfL,
+      y1: cy - halfB, y2: cy + halfB, // cy is centerline of ship
+      sbY: -(gap + halfB) // nearest hull side to quay
+    };
+  }
+
+  // --- Solve reach feasibility ---
+  function solve(){
+    const cr=state.cr, t=state.t;
+    const base=cr.base;
+    const d = pointDist(base, t);
+    const ang = normDeg(toDeg(Math.atan2(t.y - base.y, t.x - base.x)));
+    const withinR = (d>=Math.min(cr.rmin, cr.rmax)-1e-6) && (d<=Math.max(cr.rmin, cr.rmax)+1e-6);
+    let amin=normDeg(cr.amin), amax=normDeg(cr.amax);
+    let withinA=false;
+    if(amin<=amax){ withinA = ang>=amin && ang<=amax; }
+    else { withinA = ang>=amin || ang<=amax; } // sector crosses 0°
+    const insideV = pointInVessel(t);
+    return { d, ang, withinR, withinA, insideV, ok: withinR && withinA };
+  }
+
+  function pointInVessel(p){
+    const r=vesselRect();
+    return (p.x>=r.x1 && p.x<=r.x2 && p.y>=r.y1 && p.y<=r.y2);
+  }
+
+  // --- Drawing ---
+  function draw(){
+    setCanvasSize();
+    const {width:w,height:h}=canvas;
+
+    // bg
+    ctx.clearRect(0,0,w,h);
+    ctx.fillStyle = '#0b0e1a';
+    ctx.fillRect(0,0,w,h);
+
+    // water area (y<0)
+    const top=worldToScreen(0,0).y;
+    ctx.fillStyle='#061024';
+    ctx.fillRect(0,top,w,h-top);
+
+    // quay edge line y=0
+    ctx.strokeStyle='#d2d8ff';
+    ctx.lineWidth=2.5;
+    ctx.beginPath();
+    const s0=worldToScreen(-1e4,0), s1=worldToScreen(1e4,0);
+    ctx.moveTo(s0.x, s0.y); ctx.lineTo(s1.x, s1.y); ctx.stroke();
+
+    // crane base
+    const base=worldToScreen(state.cr.base.x, state.cr.base.y);
+    ctx.fillStyle='#c7d2ff';
+    ctx.fillRect(base.x-4, base.y-4, 8, 8);
+
+    // crane sectors (min/max radius and slew)
+    drawCraneSector();
+
+    // vessel
+    drawVessel();
+
+    // target
+    const ts=worldToScreen(state.t.x, state.t.y);
+    ctx.fillStyle='#c084fc';
+    ctx.beginPath(); ctx.arc(ts.x, ts.y, 5, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle='#c084fc55'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.arc(ts.x, ts.y, 9, 0, Math.PI*2); ctx.stroke();
+
+    // arm line to target + feasibility color
+    const sol=solve();
+    ctx.strokeStyle = sol.ok ? '#3ad29f' : '#ff6b6b';
+    ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(ts.x, ts.y); ctx.stroke();
+
+    // overlay stats
+    overlay(sol);
+
+    // store status
+    el('statDist').textContent = sol.d.toFixed(2)+' m';
+    el('statAng').textContent  = sol.ang.toFixed(1)+'°';
+    el('statR').innerHTML      = sol.withinR ? '<span class="ok">Yes</span>' : '<span class="no">No</span>';
+    el('statA').innerHTML      = sol.withinA ? '<span class="ok">Yes</span>' : '<span class="no">No</span>';
+    el('statInside').innerHTML = sol.insideV ? 'Yes' : 'No';
+    el('statReach').innerHTML  = sol.ok ? '<span class="ok">REACH: OK</span>' : '<span class="no">REACH: NO</span>';
+  }
+
+  function drawCraneSector(){
+    const {rmin,rmax,amin,amax,base}=state.cr;
+    const b=worldToScreen(base.x, base.y);
+    const zoom=state.view.zoom;
+
+    // dashed circles for radii
+    ctx.setLineDash([6,6]);
+    ctx.strokeStyle='#5aa9ff55'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.arc(b.x, b.y, rmin*zoom, 0, Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(b.x, b.y, rmax*zoom, 0, Math.PI*2); ctx.stroke();
+
+    // sector fill
+    const a0=toRad(amin), a1=toRad(amax);
+    ctx.setLineDash([]);
+    ctx.fillStyle='#5aa9ff18';
+    ctx.beginPath();
+    ctx.moveTo(b.x,b.y);
+    ctx.arc(b.x,b.y,rmax*zoom,a0,a1, false);
+    ctx.lineTo(b.x + Math.cos(a1)*rmin*zoom, b.y + Math.sin(a1)*rmin*zoom);
+    ctx.arc(b.x,b.y,rmin*zoom,a1,a0, true);
+    ctx.closePath(); ctx.fill();
+
+    // angle rays
+    ctx.strokeStyle='#5aa9ff88'; ctx.lineWidth=1;
+    ctx.beginPath();
+    ctx.moveTo(b.x,b.y);
+    ctx.lineTo(b.x + Math.cos(a0)*rmax*zoom, b.y + Math.sin(a0)*rmax*zoom);
+    ctx.moveTo(b.x,b.y);
+    ctx.lineTo(b.x + Math.cos(a1)*rmax*zoom, b.y + Math.sin(a1)*rmax*zoom);
+    ctx.stroke();
+  }
+
+  function drawVessel(){
+    const r=vesselRect();
+    // force the centerline y to keep the starboard side consistent with gap if user drags:
+    // We'll interpret v.cy as actual center (free), and draw hull by cy±beam/2 (gap shown via sbY line)
+    const s1=worldToScreen(r.x1, r.y1), s2=worldToScreen(r.x2, r.y2);
+    ctx.fillStyle='#7ef0ff22'; ctx.strokeStyle='#7ef0ff'; ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.rect(s1.x, s2.y, (s2.x - s1.x), (s1.y - s2.y)); // y inverted in screen
+    ctx.fill(); ctx.stroke();
+
+    // starboard side (nearest hull)
+    const sb1=worldToScreen(r.x1, r.sbY), sb2=worldToScreen(r.x2, r.sbY);
+    ctx.strokeStyle='#7ef0ffcc'; ctx.setLineDash([4,4]); ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(sb1.x,sb1.y); ctx.lineTo(sb2.x,sb2.y); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // label
+    ctx.fillStyle='#8bd3ff';
+    ctx.font='12px system-ui, sans-serif';
+    const c=worldToScreen(state.v.cx, state.v.cy);
+    ctx.fillText('Vessel', c.x+6, c.y-6);
+  }
+
+  function overlay(sol){
+    ctx.font='13px system-ui, sans-serif';
+    ctx.fillStyle = sol.ok ? '#a8ffbd' : '#ffb3b3';
+    ctx.fillText(`Reach: ${sol.ok?'OK':'NO'}  •  d=${sol.d.toFixed(2)} m  •  θ=${sol.ang.toFixed(1)}°`, 12, 20);
+  }
+
+  // --- Interaction (drag, pan, zoom) ---
+  function hitTest(mx,my){
+    // target point first
+    const t = worldToScreen(state.t.x, state.t.y);
+    if(Math.hypot(mx - t.x, my - t.y) <= 12) return {what:'target'};
+
+    // vessel rect
+    const r=vesselRect();
+    const s1=worldToScreen(r.x1, r.y1), s2=worldToScreen(r.x2, r.y2);
+    const minx=Math.min(s1.x,s2.x), maxx=Math.max(s1.x,s2.x);
+    const miny=Math.min(s1.y,s2.y), maxy=Math.max(s1.y,s2.y);
+    if(mx>=minx && mx<=maxx && my>=miny && my<=maxy) return {what:'vessel'};
+
+    return null;
+  }
+
+  canvas.addEventListener('mousedown', e=>{
+    const rect=canvas.getBoundingClientRect();
+    const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+    state.lastMouse={x:mx,y:my};
+    if(e.button===2){ state.rightDragging=true; return; }
+    const hit = hitTest(mx,my);
+    if(hit){
+      state.dragging=hit.what;
+      const w = screenToWorld(mx,my);
+      if(hit.what==='target'){
+        state.dragOff = { x: state.t.x - w.x, y: state.t.y - w.y };
+      } else if(hit.what==='vessel'){
+        state.dragOff = { x: state.v.cx - w.x, y: state.v.cy - w.y };
+      }
+    }
+  });
+  canvas.addEventListener('mousemove', e=>{
+    const rect=canvas.getBoundingClientRect();
+    const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+    const w = screenToWorld(mx,my);
+
+    if(state.rightDragging){
+      // pan
+      state.view.ox += (mx - state.lastMouse.x);
+      state.view.oy += (my - state.lastMouse.y);
+      state.lastMouse={x:mx,y:my};
+      draw(); return;
+    }
+
+    if(state.dragging==='target'){
+      state.t.x = w.x + state.dragOff.x;
+      state.t.y = w.y + state.dragOff.y;
+      reflectInputs(); draw(); return;
+    }
+    if(state.dragging==='vessel'){
+      state.v.cx = w.x + state.dragOff.x;
+      state.v.cy = w.y + state.dragOff.y;
+      reflectInputs(); draw(); return;
+    }
+  });
+  window.addEventListener('mouseup', ()=>{ state.dragging=null; state.rightDragging=false; });
+
+  canvas.addEventListener('wheel', e=>{
+    e.preventDefault();
+    const {clientX,clientY} = e;
+    const rect=canvas.getBoundingClientRect();
+    const mx=clientX-rect.left, my=clientY-rect.top;
+    const before=screenToWorld(mx,my);
+    const factor = (e.deltaY<0)? 1.1 : (1/1.1);
+    state.view.zoom = clamp(state.view.zoom*factor, 1, 30);
+    const after=screenToWorld(mx,my);
+    // zoom to mouse (keep world point under cursor)
+    const dx = after.x - before.x, dy = after.y - before.y;
+    const s = state.view.zoom;
+    state.view.ox += (dx * s);
+    state.view.oy -= (dy * s);
+    draw();
+  }, {passive:false});
+
+  canvas.addEventListener('contextmenu', e=>e.preventDefault());
+
+  // --- Fit / recenter ---
+  function fitView(){
+    // Fit vessel + crane sector bounds
+    const items=[];
+    const add=(x,y)=>items.push({x,y});
+    const v=vesselRect();
+    add(v.x1,v.y1); add(v.x1,v.y2); add(v.x2,v.y1); add(v.x2,v.y2);
+    const b=state.cr.base, rmax=state.cr.rmax;
+    add(b.x-rmax, b.y-rmax); add(b.x+rmax, b.y+rmax);
+    add(state.t.x, state.t.y);
+
+    let minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity;
+    for(const p of items){ minx=Math.min(minx,p.x); miny=Math.min(miny,p.y); maxx=Math.max(maxx,p.x); maxy=Math.max(maxy,p.y); }
+    const pad=10; // meters
+    minx-=pad; miny-=pad; maxx+=pad; maxy+=pad;
+
+    const w=wrap.clientWidth, h=wrap.clientHeight;
+    const zx = w / (maxx - minx);
+    const zy = h / (maxy - miny);
+    state.view.zoom = clamp( Math.min(zx,zy), 1, 30 );
+
+    const cx=(minx+maxx)/2, cy=(miny+maxy)/2;
+    const sc = worldToScreen(cx,cy);
+    // center to middle
+    state.view.ox += (w/2 - sc.x);
+    state.view.oy += (h/2 - sc.y);
+  }
+  function recenter(){
+    state.view.ox=0; state.view.oy=0; state.view.zoom=6;
+  }
+  el('fit').onclick=()=>{ fitView(); draw(); };
+  el('recenter').onclick=()=>{ recenter(); draw(); };
+
+  // --- Save / Load ---
+  el('save').onclick=()=>{
+    const snapshot = {
+      cr: state.cr, v: state.v, t: state.t
+    };
+    el('io').value = JSON.stringify(snapshot, null, 2);
+  };
+  el('load').onclick=()=>{
+    try{
+      const snap = JSON.parse(el('io').value);
+      if(snap.cr) state.cr = snap.cr;
+      if(snap.v ) state.v  = snap.v;
+      if(snap.t ) state.t  = snap.t;
+      reflectInputs(); draw();
+    }catch(e){ alert('Invalid JSON'); }
+  };
+
+  // --- Init ---
+  function init(){
+    setCanvasSize();
+    reflectInputs();
+    fitView();
+    draw();
+  }
+  init();
+})();
+</script>
+</body>
+</html>
