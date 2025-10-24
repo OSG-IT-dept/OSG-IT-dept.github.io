@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Stowage Plan Simulator (Offline)</title>
+<style>
+  :root{
+    --bg:#0f1520; --panel:#141b2b; --muted:#79809c; --accent:#29b6f6;
+    --good:#29d17d; --warn:#ffc107; --bad:#ff6b6b; --grid:#23304a;
+  }
+  html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Arial}
+  body{background:linear-gradient(180deg,#0b1020 0%,#0c1222 100%); color:#e9eefb}
+  header{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #1c2740}
+  header h1{font-size:18px;margin:0;font-weight:600;letter-spacing:.3px}
+  header .pill{font-size:12px;padding:4px 8px;border-radius:999px;background:#1b243a;color:#9db1ff}
+  main{display:grid;grid-template-columns:360px 1fr;gap:14px;padding:14px;min-height:calc(100% - 58px)}
+  .card{background:var(--panel); border:1px solid #1c2740; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,.25)}
+  .card h2{font-size:14px;font-weight:700;margin:0;padding:12px 12px;border-bottom:1px solid #1c2740;color:#bcd4ff; letter-spacing:.2px}
+  .card .body{padding:12px}
+  .row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+  .row label{font-size:12px;color:#a8b3d0;min-width:92px}
+  input,select,button,textarea{
+    background:#0f1628; color:#e9eefb; border:1px solid #263253; border-radius:8px;
+    padding:8px 10px; font-size:13px; outline:none;
+  }
+  input[type="number"]{width:100px}
+  input::placeholder{color:#8a94b5}
+  button{cursor:pointer}
+  button.primary{background:linear-gradient(180deg,#2962ff,#1c49cb); border-color:#1e3ea7}
+  button.ghost{background:transparent}
+  .grid-wrap{display:flex;gap:12px;height:100%}
+  .left-col{display:flex;flex-direction:column;gap:14px}
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr); gap:8px}
+  .kpi{background:#101831;border:1px solid #22305a;border-radius:10px;padding:10px}
+  .kpi .label{font-size:11px;color:#9aacd8}
+  .kpi .value{font-size:16px;font-weight:700;margin-top:2px}
+  .palette{display:grid;grid-template-columns:1fr; gap:8px; max-height:220px; overflow:auto; padding-right:4px}
+  .ctn{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px; border:1px dashed #33426e; border-radius:10px; background:#0e1526}
+  .ctn .tag{font-size:11px; padding:2px 6px; border-radius:999px; background:#192445; color:#9fb6ff}
+  .ctn .id{font-weight:700}
+  .ctn[data-type="40"]{border-style:solid}
+  .legend{display:flex; gap:8px; flex-wrap:wrap}
+  .dot{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:6px}
+  .bay-header{display:flex; gap:8px; align-items:center; padding:10px;border-bottom:1px solid #1c2740}
+  .bay-header .spacer{flex:1}
+  .grid{padding:12px; overflow:auto; height:calc(100% - 52px)}
+  .rack{display:grid; background:#0c1324; border:1px solid #263253; border-radius:12px; padding:10px}
+  .cell{
+    width:80px; height:50px; border:1px solid var(--grid); background:#0b1222; border-radius:6px;
+    display:flex; align-items:center; justify-content:center; font-size:11px; color:#7f8db3; position:relative;
+  }
+  .cell[data-over="1"]{outline:2px dashed var(--accent)}
+  .cell .slot{position:absolute; inset:3px; border-radius:5px; display:flex; align-items:center; justify-content:center;
+    background:#152036; border:1px solid #2b3c67; font-weight:700; color:#d8e3ff}
+  .slot[data-haz="true"]{box-shadow:inset 0 0 0 2px #ff9e00}
+  .slot[data-ref="true"]{box-shadow:inset 0 0 0 2px #35e0ff}
+  .slot[data-overweight="true"]{background:#2a1420; border-color:#5a2038}
+  .slot .tiny{position:absolute; bottom:4px; left:6px; font-weight:600; font-size:10px; color:#9ab0ff}
+  .slot .tiny.right{left:auto; right:6px}
+  .footer{display:flex; gap:8px; align-items:center; padding:10px; border-top:1px solid #1c2740}
+  .warn{color:var(--warn)} .bad{color:var(--bad)} .good{color:var(--good)}
+  .hr{height:1px;background:#1c2740;margin:10px 0}
+  .small{font-size:12px;color:#a5b4dc}
+  .nowrap{white-space:nowrap}
+  .ml-auto{margin-left:auto}
+  .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+  .tight{margin:-6px 0 -6px}
+  .link{color:#9fc3ff; text-decoration:underline; cursor:pointer}
+  @media (max-width:1100px){
+    main{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Stowage Plan Simulator</h1>
+  <span class="pill">Marine Surveying Web Tools</span>
+  <span class="pill">Offline • No libs</span>
+</header>
+
+<main>
+  <section class="card left-col">
+    <div class="card">
+      <h2>Vessel Layout</h2>
+      <div class="body">
+        <div class="row">
+          <label for="bays">Bays</label>
+          <input id="bays" type="number" min="1" max="200" value="8" />
+          <label for="rows">Rows (across beam)</label>
+          <input id="rows" type="number" min="2" max="30" value="10" />
+        </div>
+        <div class="row">
+          <label for="tiers">Tiers (vertical)</label>
+          <input id="tiers" type="number" min="1" max="12" value="6" />
+          <label for="maxSlotWt">Max per-slot weight (t)</label>
+          <input id="maxSlotWt" type="number" min="1" max="150" step="1" value="32" />
+        </div>
+        <div class="row">
+          <button class="primary" id="applyLayout">Apply layout</button>
+          <button class="ghost" id="resetPlan">Clear stowage</button>
+          <span class="ml-auto small">TEU slots; 40' shown bold.</span>
+        </div>
+        <div class="hr"></div>
+        <div class="kpis">
+          <div class="kpi">
+            <div class="label">Total Containers</div>
+            <div class="value" id="kpiTotal">0</div>
+          </div>
+          <div class="kpi">
+            <div class="label">Total Weight</div>
+            <div class="value" id="kpiWeight">0 t</div>
+          </div>
+          <div class="kpi">
+            <div class="label">Fore/Aft Balance</div>
+            <div class="value" id="kpiBalance">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Containers Palette</h2>
+      <div class="body">
+        <div class="row">
+          <label>ID</label><input id="c_id" placeholder="e.g., ABCU1234567" />
+        </div>
+        <div class="row">
+          <label>Length</label>
+          <select id="c_len">
+            <option value="20">20'</option>
+            <option value="40">40'</option>
+          </select>
+          <label>Weight (t)</label><input id="c_wt" type="number" min="1" max="150" step="0.5" value="20" />
+        </div>
+        <div class="row">
+          <label>POD</label><input id="c_pod" placeholder="e.g., RTM" />
+          <label>Flags</label>
+          <select id="c_flags" multiple size="2" style="height:60px;min-width:110px">
+            <option value="HAZ">Haz</option>
+            <option value="REF">Reefer</option>
+          </select>
+        </div>
+        <div class="row">
+          <button id="addCtn" class="primary">Add container</button>
+          <button id="autoGen" class="ghost" title="Generate a sample set">Auto-generate</button>
+          <span class="ml-auto small">Drag onto grid →</span>
+        </div>
+        <div class="palette" id="palette"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Plan I/O</h2>
+      <div class="body">
+        <div class="row">
+          <button id="exportPlan">Export JSON</button>
+          <input id="importFile" type="file" accept="application/json" />
+        </div>
+        <div class="row tight small">
+          <span class="dot" style="background:var(--good)"></span> OK
+          <span class="dot" style="background:var(--warn)"></span> Stacking/Segregation note
+          <span class="dot" style="background:var(--bad)"></span> Overweight / rule breach
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" style="display:flex; flex-direction:column">
+    <div class="bay-header">
+      <label>Bay</label>
+      <select id="baySelect"></select>
+      <div class="spacer"></div>
+      <span class="legend small">
+        <span><span class="dot" style="background:#192445"></span>Empty</span>
+        <span><span class="dot" style="background:#152036"></span>Loaded</span>
+        <span><span class="dot" style="background:#ff9e00"></span>HAZ</span>
+        <span><span class="dot" style="background:#35e0ff"></span>Reefer</span>
+      </span>
+    </div>
+    <div class="grid">
+      <div id="rack" class="rack"></div>
+    </div>
+    <div class="footer small">
+      <span id="baySummary">—</span>
+      <span class="ml-auto nowrap">Tip: Right-click a slot to remove. Double-click a placed box to edit.</span>
+    </div>
+  </section>
+</main>
+
+<script>
+/** -----------------------------
+ * Minimal data model (TEU slots)
+ * ship.plan[bay][row][tier] = containerId|null
+ * containers: {id,len,wt,pod,flags[]}
+ * -------------------------------- */
+const state = {
+  bays: 8, rows: 10, tiers: 6,
+  maxSlotTons: 32,
+  plan: {}, // nested
+  containers: {}, // id -> meta
+};
+const el = (q)=>document.querySelector(q);
+const rackEl = el('#rack');
+const baySel = el('#baySelect');
+const paletteEl = el('#palette');
+
+function initPlan(){
+  state.plan = {};
+  for(let b=1;b<=state.bays;b++){
+    const key = String(b);
+    state.plan[key] = [];
+    for(let r=0;r<state.rows;r++){
+      const row = [];
+      for(let t=0;t<state.tiers;t++) row.push(null);
+      state.plan[key].push(row);
+    }
+  }
+}
+function rebuildBaySelect(){
+  baySel.innerHTML='';
+  for(let b=1;b<=state.bays;b++){
+    const opt = document.createElement('option');
+    opt.value=String(b); opt.textContent = `Bay ${b}`;
+    baySel.appendChild(opt);
+  }
+}
+function buildGrid(){
+  // Current bay
+  const bay = baySel.value || '1';
+  rackEl.innerHTML='';
+  rackEl.style.gridTemplateColumns = `repeat(${state.rows}, 1fr)`;
+  rackEl.style.gridAutoRows = '1fr';
+
+  // header row labels (rows)
+  for(let r=0;r<state.rows;r++){
+    // nothing — simple grid
+  }
+  // cells: rows across X, tiers down Y (top = highest tier)
+  for(let t=state.tiers-1; t>=0; t--){
+    for(let r=0; r<state.rows; r++){
+      const cell = document.createElement('div');
+      cell.className='cell';
+      cell.dataset.row=r; cell.dataset.tier=t; cell.dataset.bay=bay;
+      cell.addEventListener('dragover', onDragOver);
+      cell.addEventListener('dragleave', e=>cell.dataset.over='0');
+      cell.addEventListener('drop', onDrop);
+      cell.addEventListener('contextmenu', (e)=>{ e.preventDefault(); removeSlot(cell); });
+      const cid = state.plan[bay][r][t];
+      if(cid){
+        const s = renderSlot(cid);
+        cell.appendChild(s);
+      }else{
+        cell.textContent = `R${r+1}/T${t+1}`;
+      }
+      rackEl.appendChild(cell);
+    }
+  }
+  updateBaySummary(bay);
+  updateKPIs();
+}
+function renderSlot(cid){
+  const meta = state.containers[cid];
+  const slot = document.createElement('div');
+  slot.className='slot';
+  slot.draggable=true;
+  slot.dataset.cid = cid;
+  slot.dataset.haz = meta.flags.includes('HAZ');
+  slot.dataset.ref = meta.flags.includes('REF');
+  slot.dataset.overweight = (meta.wt > state.maxSlotTons);
+  slot.title = `${cid} — ${meta.len}' • ${meta.wt}t • POD ${meta.pod} • ${meta.flags.join(',')||'—'}\nDouble-click to edit`;
+
+  slot.addEventListener('dragstart', (e)=>{
+    e.dataTransfer.setData('text/ctn-id', cid);
+    e.dataTransfer.effectAllowed='move';
+  });
+  slot.addEventListener('dblclick', ()=> editContainer(cid));
+  slot.innerHTML = `
+    <span class="mono">${cid}</span>
+    <span class="tiny">${meta.len}' • ${meta.wt}t</span>
+    <span class="tiny right">${meta.pod||'—'}</span>
+  `;
+  return slot;
+}
+
+/** --------- Drag & Drop ---------- */
+function onDragOver(e){
+  e.preventDefault();
+  this.dataset.over='1';
+  e.dataTransfer.dropEffect='move';
+}
+function onDrop(e){
+  e.preventDefault();
+  this.dataset.over='0';
+  const cid = e.dataTransfer.getData('text/ctn-id');
+  if(!cid) return;
+  placeContainerAtCell(cid, this);
+}
+function placeContainerAtCell(cid, cell){
+  const bay = cell.dataset.bay, row = +cell.dataset.row, tier = +cell.dataset.tier;
+  // Rule: stacking — cannot place floating; require all tiers below filled (except tier 0)
+  for(let t=0; t<tier; t++){
+    if(state.plan[bay][row][t]===null){
+      flash(cell, 'warn', 'Stack must be continuous from deck up.');
+      return;
+    }
+  }
+  // Move from previous location if present
+  removeContainerFromPlan(cid);
+  state.plan[bay][row][tier] = cid;
+  buildGrid();
+}
+
+/** --------- Removals ------------- */
+function removeSlot(cell){
+  const bay=cell.dataset.bay, row=+cell.dataset.row, tier=+cell.dataset.tier;
+  state.plan[bay][row][tier]=null;
+  buildGrid();
+}
+function removeContainerFromPlan(cid){
+  for(const bay of Object.keys(state.plan)){
+    for(let r=0;r<state.rows;r++){
+      for(let t=0;t<state.tiers;t++){
+        if(state.plan[bay][r][t]===cid){ state.plan[bay][r][t]=null; }
+      }
+    }
+  }
+}
+
+/** --------- KPIs & Checks -------- */
+function totals(){
+  let totalC=0,totalWt=0;
+  const bayWt = {};
+  for(const bay of Object.keys(state.plan)){
+    let bsum=0;
+    for(let r=0;r<state.rows;r++){
+      for(let t=0;t<state.tiers;t++){
+        const cid = state.plan[bay][r][t];
+        if(cid){ totalC++; const w = state.containers[cid]?.wt||0; totalWt+=w; bsum+=w; }
+      }
+    }
+    bayWt[bay]=bsum;
+  }
+  return {totalC,totalWt,bayWt};
+}
+function updateKPIs(){
+  const {totalC,totalWt,bayWt} = totals();
+  el('#kpiTotal').textContent = totalC;
+  el('#kpiWeight').textContent = `${totalWt.toFixed(1)} t`;
+
+  // Fore/Aft: compare first half vs second half
+  const half = Math.ceil(state.bays/2);
+  let fore=0,aft=0; // assume bays 1..half = fore, rest = aft (you can reverse if needed)
+  Object.entries(bayWt).forEach(([b,w])=>{
+    (Number(b)<=half?fore:aft) += w;
+  });
+  const diff = fore - aft;
+  const pct = (Math.abs(diff) / Math.max(1,(fore+aft)/2))*100;
+  let badge = 'good';
+  if(pct>15) badge='bad'; else if(pct>7) badge='warn';
+  el('#kpiBalance').innerHTML = `<span class="${badge}">${diff>=0?'Fore-heavy':'Aft-heavy'} ${diff>=0?'+':''}${diff.toFixed(1)} t (${pct.toFixed(1)}%)</span>`;
+}
+function updateBaySummary(bay){
+  const podCounts = {};
+  let count=0, weight=0, haz=0, ref=0, over=0, tallest=0;
+  for(let r=0;r<state.rows;r++){
+    let height=0;
+    for(let t=0;t<state.tiers;t++){
+      const cid = state.plan[bay][r][t];
+      if(cid){
+        height = t+1;
+        const meta = state.containers[cid];
+        count++; weight+=meta.wt;
+        if(meta.flags.includes('HAZ')) haz++;
+        if(meta.flags.includes('REF')) ref++;
+        if(meta.wt > state.maxSlotTons) over++;
+        podCounts[meta.pod||'—']=(podCounts[meta.pod||'—']||0)+1;
+      }
+    }
+    tallest = Math.max(tallest,height);
+  }
+  const pods = Object.entries(podCounts).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([p,c])=>`${p}:${c}`).join('  ');
+  el('#baySummary').innerHTML = `
+    <span>BAY ${bay} — <strong>${count}</strong> cntrs, <strong>${weight.toFixed(1)} t</strong>, tallest stack <strong>${tallest}</strong> tiers</span>
+    <span class="ml-auto">HAZ ${haz} • REEF ${ref} • <span class="${over?'bad':'good'}">${over} overweight</span> • PODs ${pods||'—'}</span>
+  `;
+}
+
+/** --------- Palette -------------- */
+function addToPalette(meta){
+  state.containers[meta.id]=meta;
+  const item = document.createElement('div');
+  item.className='ctn'; item.id=`p_${meta.id}`;
+  item.draggable=true;
+  item.addEventListener('dragstart', (e)=>{
+    e.dataTransfer.setData('text/ctn-id', meta.id);
+    e.dataTransfer.effectAllowed='copyMove';
+  });
+  item.innerHTML=`
+    <span>
+      <span class="id mono">${meta.id}</span>
+      <span class="tag">${meta.len}'</span>
+      <span class="tag">${meta.wt}t</span>
+      ${meta.pod?`<span class="tag">POD:${meta.pod}</span>`:''}
+      ${meta.flags.includes('HAZ')?`<span class="tag" style="background:#3b2900;color:#ffc86b">HAZ</span>`:''}
+      ${meta.flags.includes('REF')?`<span class="tag" style="background:#00313b;color:#7ee7ff">REEF</span>`:''}
+    </span>
+    <span class="small link" onclick="editContainer('${meta.id}')">edit</span>
+  `;
+  item.dataset.type = String(meta.len);
+  paletteEl.prepend(item);
+  updateKPIs();
+}
+function refreshPalette(){
+  paletteEl.innerHTML='';
+  Object.values(state.containers).forEach(addToPalette);
+}
+
+/** --------- Container editor ----- */
+function getFlagsFromSelect(sel){
+  return Array.from(sel.selectedOptions).map(o=>o.value);
+}
+function editContainer(id){
+  const c = state.containers[id];
+  const len = prompt(`Length for ${id} (20 or 40):`, c.len);
+  if(!len) return;
+  const wt = prompt(`Weight (t) for ${id}:`, c.wt);
+  if(!wt) return;
+  const pod = prompt(`POD for ${id}:`, c.pod||'');
+  c.len = Number(len)||c.len;
+  c.wt = Number(wt)||c.wt;
+  c.pod = pod||'';
+  state.containers[id]=c;
+  refreshPalette();
+  buildGrid();
+}
+
+/** --------- Export / Import ------ */
+function exportPlan(){
+  const data = {
+    meta:{bays:state.bays,rows:state.rows,tiers:state.tiers,maxSlotTons:state.maxSlotTons, ts:new Date().toISOString()},
+    containers: state.containers,
+    plan: state.plan
+  };
+  const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href=url; a.download='stowage_plan.json'; a.click();
+  URL.revokeObjectURL(url);
+}
+function importPlan(file){
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const data = JSON.parse(reader.result);
+      state.bays = data.meta?.bays||state.bays;
+      state.rows = data.meta?.rows||state.rows;
+      state.tiers = data.meta?.tiers||state.tiers;
+      state.maxSlotTons = data.meta?.maxSlotTons||state.maxSlotTons;
+      state.containers = data.containers||{};
+      state.plan = data.plan||{};
+      syncUIfromState();
+      refreshPalette(); buildGrid();
+    }catch(e){ alert('Invalid JSON'); }
+  };
+  reader.readAsText(file);
+}
+
+/** --------- Utilities ------------ */
+function syncUIfromState(){
+  el('#bays').value = state.bays;
+  el('#rows').value = state.rows;
+  el('#tiers').value = state.tiers;
+  el('#maxSlotWt').value = state.maxSlotTons;
+  rebuildBaySelect();
+}
+function flash(node, level='warn', msg=''){
+  node.animate([{boxShadow:'0 0 0 0 rgba(0,0,0,0)'},{boxShadow:`0 0 0 4px ${level==='bad'?'#ff6b6b55':'#ffc10755'}`}],{duration:600});
+  if(msg) { console.warn(msg); }
+}
+
+/** --------- Event wiring --------- */
+el('#applyLayout').addEventListener('click', ()=>{
+  state.bays = Math.max(1, Math.min(200, +el('#bays').value||8));
+  state.rows = Math.max(2, Math.min(30, +el('#rows').value||10));
+  state.tiers = Math.max(1, Math.min(12, +el('#tiers').value||6));
+  state.maxSlotTons = Math.max(1, Math.min(150, +el('#maxSlotWt').value||32));
+  initPlan(); rebuildBaySelect(); buildGrid();
+});
+el('#resetPlan').addEventListener('click', ()=>{
+  if(!confirm('Clear all stowage (keeps containers)?')) return;
+  initPlan(); buildGrid();
+});
+baySel.addEventListener('change', buildGrid);
+
+el('#addCtn').addEventListener('click', ()=>{
+  const id = (el('#c_id').value||`CTN${Math.random().toString(36).slice(2,7).toUpperCase()}`).toUpperCase();
+  const len = +el('#c_len').value;
+  const wt = +el('#c_wt').value;
+  const pod = (el('#c_pod').value||'').toUpperCase();
+  const flags = getFlagsFromSelect(el('#c_flags'));
+  if(state.containers[id]){ alert('ID already exists'); return; }
+  addToPalette({id,len,wt,pod,flags});
+  el('#c_id').value='';
+});
+
+el('#autoGen').addEventListener('click', ()=>{
+  const pods = ['RTM','HAM','ALG','LON','NYC','SGP'];
+  for(let i=0;i<18;i++){
+    const id = 'CTN'+(100000+i);
+    const len = (Math.random()<0.45)?40:20;
+    const wt = Math.round((12 + Math.random()*20)*2)/2;
+    const pod = pods[Math.floor(Math.random()*pods.length)];
+    const flags = [];
+    if(Math.random()<0.12) flags.push('HAZ');
+    if(Math.random()<0.15) flags.push('REF');
+    if(state.containers[id]) continue;
+    addToPalette({id,len,wt,pod,flags});
+  }
+});
+
+el('#exportPlan').addEventListener('click', exportPlan);
+el('#importFile').addEventListener('change', (e)=>{ if(e.target.files[0]) importPlan(e.target.files[0]); });
+
+/** --------- Initialize ----------- */
+(function init(){
+  initPlan();
+  rebuildBaySelect();
+  buildGrid();
+  // Seed a couple of boxes
+  ['ABCU1234567','MSCU7654321','TGHU0000123'].forEach((id,i)=>{
+    addToPalette({id, len:[20,40,20][i], wt:[22,28,18][i], pod:['RTM','HAM','LON'][i], flags:i===1?['REF']:[]});
+  });
+})();
+</script>
+</body>
+</html>
