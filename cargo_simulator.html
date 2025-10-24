@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Cargo on Rolling Deck — Friction & Tipping Simulator</title>
+<style>
+  :root { --fg:#1b1f23; --bg:#fff; --muted:#6a737d; --accent:#0066ff; }
+  body { margin:0; font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color:var(--fg); background:var(--bg); }
+  header { padding:12px 16px; border-bottom:1px solid #eaecef; display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; }
+  #controls { display:flex; flex-wrap:wrap; gap:12px 18px; align-items:flex-end; }
+  .ctrl { display:grid; gap:4px; }
+  .ctrl label { font-size:12px; color:var(--muted); }
+  .ctrl input[type=range] { width:220px; }
+  .ctrl input[type=number] { width:84px; padding:6px 8px; border:1px solid #d1d5da; border-radius:6px; }
+  .capsule { display:inline-flex; gap:8px; align-items:center; background:#f6f8fa; border:1px solid #e1e4e8; padding:6px 8px; border-radius:999px; font-size:12px; }
+  #wrap { display:grid; grid-template-columns: 1fr 320px; gap:0; min-height:calc(100vh - 60px); }
+  #right { border-left:1px solid #eaecef; padding:12px; display:flex; flex-direction:column; gap:10px; }
+  canvas { display:block; width:100%; height:100%; background:linear-gradient(180deg, #eef5ff 0%, #f9fbff 100%); }
+  .readout { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; background:#f6f8fa; border:1px solid #e1e4e8; border-radius:8px; padding:10px; }
+  .bar { height:10px; background:#e6ebf1; border-radius:6px; overflow:hidden; }
+  .bar > div { height:100%; width:0%; background:linear-gradient(90deg,#2ecc71,#f1c40f,#e67e22,#e74c3c); transition:width .1s linear; }
+  .legend { display:grid; gap:4px; color:var(--muted); font-size:12px; }
+  button { padding:7px 10px; border-radius:8px; border:1px solid #d1d5da; background:#fff; cursor:pointer; }
+  button:active { transform:translateY(1px); }
+  .danger { color:#e74c3c; font-weight:600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🛳️ Cargo on Rolling Deck — Friction & Tipping</h1>
+  <div id="controls">
+    <div class="ctrl">
+      <label>Mass (t)</label>
+      <input id="mass" type="number" value="30" min="1" step="1" />
+    </div>
+    <div class="ctrl">
+      <label>μ<sub>s</sub> (static)</label>
+      <input id="muS" type="range" min="0" max="1" step="0.01" value="0.5" />
+    </div>
+    <div class="ctrl">
+      <label>μ<sub>k</sub> (kinetic)</label>
+      <input id="muK" type="range" min="0" max="1" step="0.01" value="0.4" />
+    </div>
+    <div class="ctrl">
+      <label>Deck roll amplitude (°)</label>
+      <input id="ampDeg" type="range" min="0" max="25" step="0.1" value="8" />
+    </div>
+    <div class="ctrl">
+      <label>Roll period (s)</label>
+      <input id="period" type="range" min="2" max="20" step="0.1" value="8" />
+    </div>
+    <div class="ctrl">
+      <label>Deck length (m)</label>
+      <input id="deckLen" type="range" min="20" max="120" step="1" value="60" />
+    </div>
+    <div class="ctrl">
+      <label>Cargo width × height (m)</label>
+      <div class="capsule">
+        <input id="boxW" type="number" value="3.0" min="0.2" step="0.1" />
+        ×
+        <input id="boxH" type="number" value="3.0" min="0.2" step="0.1" />
+      </div>
+    </div>
+    <div class="ctrl">
+      <label>&nbsp;</label>
+      <button id="reset">Reset position</button>
+    </div>
+  </div>
+</header>
+
+<div id="wrap">
+  <canvas id="cv"></canvas>
+  <aside id="right">
+    <div class="readout" id="nums"></div>
+    <div class="legend">Sliding / Tipping risk</div>
+    <div class="bar"><div id="riskBar"></div></div>
+    <div class="legend">
+      <div>Rule of thumb (tipping): |tanθ| / (W/(2H)) ≥ 1 ⇒ likely tip.</div>
+      <div>Sliding threshold: |tanθ| ≥ μ<sub>s</sub> (if initially at rest).</div>
+    </div>
+    <div class="readout" id="explain">
+      This simplified model uses a 2D mid-ship section. The deck rolls with θ(t)=A·sin(ωt). When gravity’s downslope component exceeds static friction, the cargo slides with kinetic friction μ<sub>k</sub>. Tipping risk is estimated by whether the gravity line of action leaves the base (depends on θ and W/H). In reality, additional terms (heave/sway, angular accelerations, lashing, stiction hysteresis, etc.) can matter; this is intended for quick intuition and what-if analysis.
+    </div>
+  </aside>
+</div>
+
+<script>
+(() => {
+  // ------- Parameters & state -------
+  const g = 9.80665;      // m/s^2
+  const pxPerMeter = 8;   // render scale
+
+  const ui = {
+    mass:    document.getElementById('mass'),
+    muS:     document.getElementById('muS'),
+    muK:     document.getElementById('muK'),
+    ampDeg:  document.getElementById('ampDeg'),
+    period:  document.getElementById('period'),
+    deckLen: document.getElementById('deckLen'),
+    boxW:    document.getElementById('boxW'),
+    boxH:    document.getElementById('boxH'),
+    reset:   document.getElementById('reset'),
+    nums:    document.getElementById('nums'),
+    riskBar: document.getElementById('riskBar')
+  };
+
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  let W=0, H=0;
+
+  let state = {
+    t: 0,
+    x: 0,         // position along deck centerline (m), 0 = midship
+    v: 0,         // velocity along deck (m/s)
+    sliding: false,
+    tipped: false
+  };
+
+  function params() {
+    return {
+      mass:  Math.max(0.1, parseFloat(ui.mass.value))*1000, // tons -> kg
+      muS:   parseFloat(ui.muS.value),
+      muK:   parseFloat(ui.muK.value),
+      A:     deg2rad(parseFloat(ui.ampDeg.value)), // amplitude (rad)
+      T:     parseFloat(ui.period.value),
+      L:     parseFloat(ui.deckLen.value),
+      boxW:  parseFloat(ui.boxW.value),
+      boxH:  parseFloat(ui.boxH.value)
+    };
+  }
+
+  function deg2rad(d){return d*Math.PI/180;}
+  function rad2deg(r){return r*180/Math.PI;}
+
+  function resetSim() {
+    state = { t: 0, x: 0, v: 0, sliding:false, tipped:false };
+  }
+  ui.reset.addEventListener('click', resetSim);
+
+  // ------- Simulation step -------
+  let lastMs = performance.now();
+  function step(nowMs) {
+    const p = params();
+    const dt = Math.min(0.03, (nowMs - lastMs)/1000); // clamp dt for stability
+    lastMs = nowMs;
+    state.t += dt;
+
+    const omega = (2*Math.PI)/p.T;
+    const theta = p.A * Math.sin(omega * state.t);          // deck angle (rad)
+    const tanTheta = Math.tan(Math.abs(theta));
+    const sinTheta = Math.sin(theta);
+    const cosTheta = Math.cos(theta);
+
+    // Tipping threshold (simple static criterion):
+    // tip when |tanθ| > W/(2H)
+    const tipThreshold = p.boxW / (2*p.boxH);
+    const tipRatio = tanTheta / tipThreshold;
+    state.tipped = tipRatio >= 1;
+
+    // Sliding condition at this instant (if initially resting)
+    const slideThreshold = p.muS; // |tanθ| >= μs
+    const wantsToSlideFromRest = tanTheta >= slideThreshold;
+
+    // Decide stick vs slip:
+    // If already sliding, keep sliding until velocity would reverse and static can hold.
+    // If not sliding, check if static friction can hold.
+    if (!state.sliding) {
+      state.sliding = wantsToSlideFromRest;
+    } else {
+      // keep sliding; we'll handle possible stick when v ~ 0 and downslope < μs
+    }
+
+    // Dynamics along plane:
+    let a = 0;
+    if (state.sliding) {
+      // downslope acceleration with kinetic friction opposing motion
+      const downslope = g * sinTheta;
+      const normal = g * cosTheta;
+      const friction = p.muK * normal;
+      const sign = Math.sign(state.v || downslope || 1);
+      a = downslope - friction * sign;
+      // If velocity changes sign and static could hold, stop sliding
+      const vNext = state.v + a*dt;
+      const signChanged = Math.sign(state.v) !== Math.sign(vNext) && Math.abs(vNext) < 0.02;
+      const staticCanHold = Math.abs(Math.tan(theta)) < p.muS;
+      if (signChanged && staticCanHold) {
+        state.sliding = false;
+        state.v = 0;
+        a = 0;
+      } else {
+        state.v = vNext;
+        state.x += state.v * dt;
+      }
+    } else {
+      // sticking to deck: no relative motion along deck
+      a = 0;
+      // v, x unchanged
+    }
+
+    // Keep cargo on deck bounds (soft clamp with bounce)
+    const halfL = p.L * 0.5;
+    if (state.x < -halfL) { state.x = -halfL; state.v = 0; }
+    if (state.x >  halfL) { state.x =  halfL; state.v = 0; }
+
+    draw(theta, p);
+    updateReadout(theta, p, tipRatio, slideThreshold, a);
+    requestAnimationFrame(step);
+  }
+
+  // ------- Rendering -------
+  function draw(theta, p) {
+    // Resize canvas to device pixels
+    const dpr = devicePixelRatio || 1;
+    const cssW = cv.clientWidth, cssH = cv.clientHeight;
+    if (cssW !== W || cssH !== H) {
+      W = cssW; H = cssH;
+      cv.width = Math.round(W*dpr);
+      cv.height = Math.round(H*dpr);
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+
+    // Clear
+    ctx.clearRect(0,0,W,H);
+
+    // World origin at center
+    ctx.save();
+    ctx.translate(W/2, H*0.58);
+
+    // Deck
+    const deckLenPx = params().L * pxPerMeter;
+    const deckThickPx = 24;
+
+    ctx.save();
+    ctx.rotate(theta);
+    // draw deck as big rectangle
+    ctx.fillStyle = '#d8e6ff';
+    ctx.strokeStyle = '#6a8ad6';
+    roundRect(ctx, -deckLenPx/2, -deckThickPx/2, deckLenPx, deckThickPx, 8, true, true);
+
+    // Cargo (on deck, at position x)
+    const xPx = state.x * pxPerMeter;
+    const wPx = params().boxW * pxPerMeter;
+    const hPx = params().boxH * pxPerMeter;
+
+    // Cargo base sits on top of deck rectangle
+    const baseY = -deckThickPx/2;
+
+    // Body
+    ctx.fillStyle = state.tipped ? '#ffdddd' : '#fff3c4';
+    ctx.strokeStyle = '#d4a72c';
+    roundRect(ctx, xPx - wPx/2, baseY - hPx, wPx, hPx, 6, true, true);
+
+    // Visuals: center of mass dot
+    ctx.beginPath();
+    ctx.arc(xPx, baseY - hPx/2, 4, 0, Math.PI*2);
+    ctx.fillStyle = '#e74c3c';
+    ctx.fill();
+
+    // Draw a small gravity component arrow along plane
+    const gLen = 60;
+    ctx.beginPath();
+    ctx.moveTo(xPx, baseY - hPx - 14);
+    ctx.lineTo(xPx + gLen*Math.sin(theta), baseY - hPx - 14 + gLen*Math.cos(theta));
+    ctx.strokeStyle = '#ff6b6b';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.font = '12px ui-monospace, monospace';
+    ctx.fillStyle = '#ff6b6b';
+    ctx.fillText('g⊥/∥', xPx + gLen*Math.sin(theta)+4, baseY - hPx - 14 + gLen*Math.cos(theta)+4);
+
+    // Draw friction arrow (if sliding)
+    if (state.sliding) {
+      const fLen = 50;
+      const sgn = Math.sign(state.v || Math.sin(theta) || 1);
+      ctx.beginPath();
+      ctx.moveTo(xPx, baseY - hPx + 10);
+      ctx.lineTo(xPx - sgn*fLen*Math.cos(theta), baseY - hPx + 10 + sgn*fLen*Math.sin(theta));
+      ctx.strokeStyle = '#2ecc71';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = '#2ecc71';
+      ctx.fillText('μ_k N', xPx - sgn*fLen*Math.cos(theta)+4, baseY - hPx + 10 + sgn*fLen*Math.sin(theta)+4);
+    }
+
+    ctx.restore(); // end deck space
+
+    // Horizon and labels
+    ctx.save();
+    ctx.globalAlpha = 0.7;
+    ctx.strokeStyle = '#cfd7e3';
+    ctx.beginPath();
+    ctx.moveTo(-W, 80);
+    ctx.lineTo(W, 80);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.restore();
+  }
+
+  function roundRect(ctx, x, y, w, h, r, fill, stroke) {
+    if (w < 2*r) r = w/2;
+    if (h < 2*r) r = h/2;
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.arcTo(x+w, y,   x+w, y+h, r);
+    ctx.arcTo(x+w, y+h, x,   y+h, r);
+    ctx.arcTo(x,   y+h, x,   y,   r);
+    ctx.arcTo(x,   y,   x+w, y,   r);
+    if (fill) ctx.fill();
+    if (stroke) ctx.stroke();
+  }
+
+  // ------- Readouts -------
+  function updateReadout(theta, p, tipRatio, slideThreshold, a) {
+    const deg = rad2deg(theta);
+    const speed = state.v; // m/s
+    const disp = state.x;  // m
+    const critDeg = rad2deg(Math.atan(p.boxW/(2*p.boxH)));
+    const slideRatio = Math.tan(Math.abs(theta));
+    const slidingNow = state.sliding;
+    const tippedNow = state.tipped;
+
+    ui.riskBar.style.width = Math.min(100, (tipRatio*100)).toFixed(1) + '%';
+
+    ui.nums.innerHTML =
+      `t = ${state.t.toFixed(1)} s\n` +
+      `θ = ${deg.toFixed(2)}° (A = ${rad2deg(p.A).toFixed(1)}°, T = ${p.T.toFixed(1)} s)\n` +
+      `μs = ${p.muS.toFixed(2)}, μk = ${p.muK.toFixed(2)}\n` +
+      `Deck length = ${p.L.toFixed(1)} m, Cargo = ${p.boxW.toFixed(2)} × ${p.boxH.toFixed(2)} m\n` +
+      `Displacement = ${disp.toFixed(2)} m, Velocity = ${speed.toFixed(2)} m/s, Accel = ${a.toFixed(2)} m/s²\n` +
+      `Sliding criterion: |tanθ| ${slidingNow? '>' : (slideRatio.toFixed(2)+' ?')} μs (${slideThreshold.toFixed(2)}) → ` +
+      (slidingNow ? 'SLIDING' : 'STICKING') + `\n` +
+      `Tipping criterion: θ_crit ≈ ${critDeg.toFixed(2)}°. Ratio = ${tipRatio.toFixed(2)} ` +
+      (tippedNow ? '→ <span class="danger">TIPPING RISK</span>' : '→ OK');
+
+  }
+
+  // ------- Init & run -------
+  function fitCanvas() {
+    // Trigger resize by touching CSS size (flex layout will drive it)
+    // No-op here; canvas size handled each frame
+  }
+  window.addEventListener('resize', fitCanvas);
+
+  requestAnimationFrame((t)=>{ lastMs = performance.now(); step(performance.now()); });
+})();
+</script>
+</body>
+</html>
