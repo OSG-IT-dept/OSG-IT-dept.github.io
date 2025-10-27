@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Vessel Temp & Gas Logger (Offline, 30-day retention)</title>
+<style>
+  :root{--bg:#0f1320;--panel:#141a2a;--ink:#e9eefb;--muted:#9fb0d0;--accent:#6ea8fe;--ok:#38d39f;--warn:#f7c948}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto}
+  header{position:sticky;top:0;background:rgba(15,19,32,.95);backdrop-filter:saturate(140%) blur(6px);padding:12px 16px;border-bottom:1px solid #223;z-index:3}
+  h1{margin:0;font-size:18px}
+  #wrap{display:grid;grid-template-columns:380px 1fr;gap:16px;padding:16px}
+  .card{background:var(--panel);border:1px solid #223;border-radius:10px;padding:14px}
+  label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
+  input,textarea,select,button{width:100%;padding:10px;border-radius:8px;border:1px solid #334;background:#0f1320;color:var(--ink)}
+  input[type="number"]{text-align:right}
+  button{background:var(--accent);border:none;cursor:pointer}
+  button.secondary{background:#2a3350}
+  .row{display:flex;gap:8px}
+  .row>*{flex:1}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{border-bottom:1px solid #223;padding:8px;text-align:left;vertical-align:top}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;border:1px solid #334;color:var(--muted)}
+  .ok{color:var(--ok)} .warn{color:var(--warn)}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+  .right{margin-left:auto}
+  .mono{font-family:ui-monospace, Menlo, Consolas, monospace}
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+  small.hint{color:var(--muted);font-size:11px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Vessel Temp & Gas Logger — <span id="vesselLabel" class="pill">no vessel</span> · <span id="status" class="pill">init…</span></h1>
+  <div class="row" style="margin-top:8px;max-width:920px">
+    <div>
+      <label>Vessel</label>
+      <input id="inpVessel" placeholder="e.g., MV OCEAN STAR" />
+    </div>
+    <div>
+      <label>Quick holds for vessel</label>
+      <select id="selKnownHolds"><option value="">— None —</option></select>
+    </div>
+    <div style="display:flex;align-items:flex-end">
+      <button class="secondary" id="btnSetVessel">Set vessel</button>
+    </div>
+  </div>
+  <small class="hint">Vessel is stored locally and applied to new readings. Change at any time.</small>
+</header>
+
+<div id="wrap">
+  <!-- LEFT: Entry + Tools -->
+  <section class="card">
+    <h3 style="margin:0 0 8px">New Reading</h3>
+
+    <div class="row">
+      <div>
+        <label>Hold</label>
+        <input id="inpHold" placeholder="e.g., Hold 1, Forepeak, Aft Tank" />
+      </div>
+      <div>
+        <label>Timestamp</label>
+        <input id="inpTime" type="datetime-local" />
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div>
+        <label>Temperature (°C)</label>
+        <input id="inpTemp" type="number" step="0.1" placeholder="e.g. 22.5" />
+      </div>
+      <div>
+        <label>O₂ (%)</label>
+        <input id="inpO2" type="number" step="0.1" placeholder="e.g. 20.9" />
+      </div>
+    </div>
+
+    <div class="grid4">
+      <div>
+        <label>CO (ppm)</label>
+        <input id="inpCO" type="number" step="1" placeholder="e.g. 0" />
+      </div>
+      <div>
+        <label>H₂S (ppm)</label>
+        <input id="inpH2S" type="number" step="1" placeholder="e.g. 0" />
+      </div>
+      <div>
+        <label>CH₄ (%)</label>
+        <input id="inpCH4" type="number" step="0.01" placeholder="e.g. 0.00" />
+      </div>
+      <div>
+        <label>—</label>
+        <button class="secondary" id="btnFillAir">Fill with fresh air baseline</button>
+      </div>
+    </div>
+
+    <label>Notes</label>
+    <textarea id="inpNotes" rows="3" placeholder="Optional observation…"></textarea>
+
+    <div class="bar">
+      <button id="btnAdd">Save reading</button>
+      <span id="pending" class="pill">0 saved</span>
+      <span class="right mono" id="storeInfo"></span>
+    </div>
+
+    <hr style="border-color:#223;margin:14px 0">
+
+    <h3 style="margin:0 0 8px">Backups</h3>
+    <div class="row">
+      <button class="secondary" id="btnExportJSON">Export JSON</button>
+      <button class="secondary" id="btnExportCSV">Export CSV</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="fileImport" type="file" accept=".json,application/json" />
+      <button id="btnImport">Import JSON</button>
+    </div>
+    <div class="bar">
+      <button class="secondary" id="btnPickFile">Pick rolling backup file (optional)</button>
+      <span id="fsStatus" class="pill">no file</span>
+    </div>
+
+    <hr style="border-color:#223;margin:14px 0">
+    <h3 style="margin:0 0 8px">Retention</h3>
+    <div class="row">
+      <select id="selDays">
+        <option value="30" selected>Keep 30 days</option>
+        <option value="60">Keep 60 days</option>
+        <option value="90">Keep 90 days</option>
+        <option value="365">Keep 365 days</option>
+      </select>
+      <button class="secondary" id="btnPurge">Purge now</button>
+    </div>
+  </section>
+
+  <!-- RIGHT: Records -->
+  <section class="card">
+    <div class="row" style="align-items:flex-end">
+      <div>
+        <h3 style="margin:0 0 8px">Recorded Readings</h3>
+        <div class="row">
+          <div>
+            <label>From</label>
+            <input id="fltFrom" type="date">
+          </div>
+          <div>
+            <label>To</label>
+            <input id="fltTo" type="date">
+          </div>
+          <div>
+            <label>Vessel</label>
+            <input id="fltVessel" placeholder="(all vessels)">
+          </div>
+          <div>
+            <label>Hold</label>
+            <input id="fltHold" placeholder="(all holds)">
+          </div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="secondary" id="btnFilter">Filter</button>
+          </div>
+        </div>
+      </div>
+      <div class="right">
+        <label>Show</label>
+        <select id="selLimit">
+          <option>100</option><option selected>500</option><option>2000</option><option>All</option>
+        </select>
+      </div>
+    </div>
+
+    <table id="tbl">
+      <thead>
+        <tr>
+          <th>Date/Time</th><th>Vessel</th><th>Hold</th>
+          <th>°C</th><th>O₂ %</th><th>CO ppm</th><th>H₂S ppm</th><th>CH₄ %</th>
+          <th>Notes</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </section>
+</div>
+
+<script>
+/* ===== IndexedDB setup ===== */
+const DB_NAME = 'tempGasLoggerDB';
+const DB_VER  = 2; // bumped for vessel/hold/gases
+const STORE   = 'logs';
+let db;
+
+const openReq = indexedDB.open(DB_NAME, DB_VER);
+openReq.onupgradeneeded = (e) => {
+  const _db = e.target.result;
+  let os;
+  if (!_db.objectStoreNames.contains(STORE)) {
+    os = _db.createObjectStore(STORE, { keyPath: 'id' });
+  } else {
+    os = e.target.transaction.objectStore(STORE);
+  }
+  // Indexes
+  if (!os.indexNames.contains('ts'))      os.createIndex('ts', 'ts', { unique:false });
+  if (!os.indexNames.contains('vessel'))  os.createIndex('vessel', 'vessel', { unique:false });
+  if (!os.indexNames.contains('hold'))    os.createIndex('hold', 'hold', { unique:false });
+};
+openReq.onsuccess = (e) => { db = e.target.result; initUI(); };
+openReq.onerror   = () => alert('Failed to open local store.');
+
+/* ===== Utilities ===== */
+const $ = (id) => document.getElementById(id);
+const fmtDT = (ms) => new Date(ms).toLocaleString();
+const daysToMs = d => d*24*60*60*1000;
+const LS_VESSEL = 'tempGasLogger_vessel';
+const LS_HOLDS  = 'tempGasLogger_knownHolds'; // per-vessel dictionary
+
+function tx(mode='readonly'){ return db.transaction([STORE], mode).objectStore(STORE); }
+
+function getVessel(){ return (localStorage.getItem(LS_VESSEL)||'').trim(); }
+function setVessel(v){ localStorage.setItem(LS_VESSEL, v.trim()); uiVessel(); refreshKnownHolds(); }
+
+function addKnownHold(vessel, hold){
+  if(!vessel || !hold) return;
+  const map = JSON.parse(localStorage.getItem(LS_HOLDS) || '{}');
+  const set = new Set(map[vessel] || []);
+  set.add(hold);
+  map[vessel] = Array.from(set).sort();
+  localStorage.setItem(LS_HOLDS, JSON.stringify(map));
+  refreshKnownHolds();
+}
+
+function knownHolds(vessel){
+  const map = JSON.parse(localStorage.getItem(LS_HOLDS) || '{}');
+  return map[vessel] || [];
+}
+
+function addReading(rec){
+  return new Promise((res, rej)=>{
+    const safe = {
+      id: crypto.randomUUID(),
+      ts: rec.ts ?? Date.now(),
+      vessel: String(rec.vessel||'').trim(),
+      hold: String(rec.hold||'').trim(),
+      temp: Number(rec.temp),
+      o2:   rec.o2===''? null : Number(rec.o2),
+      co:   rec.co===''? null : Number(rec.co),
+      h2s:  rec.h2s===''? null : Number(rec.h2s),
+      ch4:  rec.ch4===''? null : Number(rec.ch4),
+      notes: (rec.notes||"").trim()
+    };
+    const req = tx('readwrite').put(safe);
+    req.onsuccess = () => res(safe);
+    req.onerror = (e) => rej(e);
+  });
+}
+
+function deleteReading(id){
+  return new Promise((res,rej)=>{
+    tx('readwrite').delete(id).onsuccess = res;
+  });
+}
+
+function listReadings({from, to, vessel, hold, limit}={}){
+  return new Promise((res)=>{
+    const out = [];
+    const idx = tx().index('ts');
+    const range = (from||to) ? IDBKeyRange.bound(from||0, to||Number.MAX_SAFE_INTEGER) : null;
+    const req = (range ? idx.openCursor(range,'prev') : idx.openCursor(null,'prev'));
+    req.onsuccess = (e)=>{
+      const c = e.target.result;
+      if(!c) return res(out);
+      if (limit && out.length >= limit) return res(out);
+      const v = (vessel||'').toLowerCase(), h = (hold||'').toLowerCase();
+      const okV = !v || (String(c.value.vessel||'').toLowerCase().includes(v));
+      const okH = !h || (String(c.value.hold||'').toLowerCase().includes(h));
+      if (okV && okH) out.push(c.value);
+      c.continue();
+    };
+  });
+}
+
+function countAll(){
+  return new Promise((res)=> tx().count().onsuccess = (e)=>res(e.target.result));
+}
+
+function purgeOld(days){
+  return new Promise((res)=>{
+    const cutoff = Date.now() - daysToMs(days);
+    const store = tx('readwrite');
+    const idx = store.index('ts');
+    const range = IDBKeyRange.upperBound(cutoff, true);
+    let removed = 0;
+    idx.openCursor(range).onsuccess = (e)=>{
+      const c = e.target.result; if(!c){ res(removed); return; }
+      store.delete(c.primaryKey); removed++; c.continue();
+    };
+  });
+}
+
+/* ===== Optional File System Access API (rolling JSONL backup) ===== */
+let fileHandle = null;
+async function pickBackupFile(){
+  if (!('showSaveFilePicker' in window)) {
+    $('fsStatus').textContent = 'not supported';
+    return;
+  }
+  fileHandle = await showSaveFilePicker({
+    suggestedName: 'vessel-temp-gas.jsonl',
+    types: [{description:'JSON Lines', accept:{'application/json':['.jsonl','.json']}}]
+  });
+  $('fsStatus').textContent = 'file linked';
+}
+async function appendBackup(rec){
+  try{
+    if(!fileHandle) return;
+    const writable = await fileHandle.createWritable({keepExistingData:true});
+    await writable.seek((await fileHandle.getFile()).size);
+    await writable.write(JSON.stringify(rec) + "\n");
+    await writable.close();
+  }catch(_){ /* ignore */ }
+}
+
+/* ===== Export / Import ===== */
+async function exportJSON(){
+  const all = await listReadings({limit:null});
+  const blob = new Blob([JSON.stringify(all, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `vessel-temp-gas-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+async function exportCSV(){
+  const all = await listReadings({limit:null});
+  const esc = (s)=> `"${String(s??'').replace(/"/g,'""')}"`;
+  const rows = [['id','timestamp_iso','vessel','hold','temperature_c','o2_pct','co_ppm','h2s_ppm','ch4_pct','notes']]
+    .concat(all.map(r => [r.id, new Date(r.ts).toISOString(), r.vessel, r.hold, r.temp, r.o2??'', r.co??'', r.h2s??'', r.ch4??'', r.notes]))
+    .map(arr => arr.map(esc).join(','))
+    .join('\n');
+  const blob = new Blob([rows], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `vessel-temp-gas-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+async function importJSON(file){
+  const text = await file.text();
+  const arr = JSON.parse(text);
+  const store = tx('readwrite');
+  await new Promise((res)=>{
+    let i=0;
+    (function putNext(){
+      if(i>=arr.length) return res();
+      const r = arr[i++];
+      const safe = {
+        id: r.id || crypto.randomUUID(),
+        ts: Number(r.ts||Date.parse(r.timestamp_iso)||Date.now()),
+        vessel: String(r.vessel||''),
+        hold: String(r.hold||''),
+        temp: Number(r.temp ?? r.temperature ?? 0),
+        o2:   (r.o2??r.o2_pct??'')===''? null : Number(r.o2??r.o2_pct),
+        co:   (r.co??r.co_ppm??'')===''? null : Number(r.co??r.co_ppm),
+        h2s:  (r.h2s??r.h2s_ppm??'')===''? null : Number(r.h2s??r.h2s_ppm),
+        ch4:  (r.ch4??r.ch4_pct??'')===''? null : Number(r.ch4??r.ch4_pct),
+        notes: String(r.notes||'')
+      };
+      store.put(safe).onsuccess = putNext;
+    })();
+  });
+}
+
+/* ===== UI glue ===== */
+function uiVessel(){
+  const v = getVessel() || 'no vessel';
+  $('vesselLabel').textContent = v;
+  $('fltVessel').value = getVessel();
+}
+
+function refreshKnownHolds(){
+  const holds = knownHolds(getVessel());
+  const sel = $('selKnownHolds');
+  sel.innerHTML = '<option value="">— None —</option>' + holds.map(h=>`<option>${h}</option>`).join('');
+}
+
+async function render(){
+  // filters
+  const from = $('fltFrom').value ? new Date($('fltFrom').value).setHours(0,0,0,0) : null;
+  const to   = $('fltTo').value   ? new Date($('fltTo').value).setHours(23,59,59,999) : null;
+  const limV = $('selLimit').value;
+  const limit = (limV==='All') ? null : Number(limV);
+  const vessel = $('fltVessel').value.trim();
+  const hold   = $('fltHold').value.trim();
+
+  const recs = await listReadings({from, to, vessel, hold, limit});
+  const tb = $('rows'); tb.innerHTML = '';
+  for(const r of recs){
+    const warn = (x,th)=> (x!=null && x>=th) ? 'warn' : 'ok';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="mono">${fmtDT(r.ts)}</td>
+      <td>${(r.vessel||'').replace(/</g,'&lt;')}</td>
+      <td>${(r.hold||'').replace(/</g,'&lt;')}</td>
+      <td class="${warn(r.temp,50)} mono">${(r.temp??'').toString().padStart(0)}${r.temp!=null?'' : ''}</td>
+      <td class="${warn(r.o2,23.5)} mono">${r.o2==null?'':Number(r.o2).toFixed(1)}</td>
+      <td class="${warn(r.co,25)} mono">${r.co==null?'':Number(r.co).toFixed(0)}</td>
+      <td class="${warn(r.h2s,5)} mono">${r.h2s==null?'':Number(r.h2s).toFixed(0)}</td>
+      <td class="${warn(r.ch4,1)} mono">${r.ch4==null?'':Number(r.ch4).toFixed(2)}</td>
+      <td>${(r.notes||'').replace(/</g,'&lt;')}</td>
+      <td><button class="secondary" data-id="${r.id}">Delete</button></td>`;
+    tb.appendChild(tr);
+  }
+  tb.querySelectorAll('button[data-id]').forEach(btn=>{
+    btn.onclick = async ()=>{ await deleteReading(btn.dataset.id); render(); updateCounts(); };
+  });
+}
+
+async function updateCounts(){
+  const n = await countAll();
+  $('pending').textContent = `${n} saved locally`;
+}
+
+async function initUI(){
+  $('status').textContent = 'local store ready';
+  $('inpTime').value = new Date().toISOString().slice(0,16);
+  $('selDays').value = '30';
+  $('storeInfo').textContent = `DB:${DB_NAME} • Store:${STORE}`;
+  $('inpVessel').value = getVessel();
+  uiVessel(); refreshKnownHolds();
+
+  await purgeOld(Number($('selDays').value)); // enforce on load
+  await render(); updateCounts();
+
+  $('btnSetVessel').onclick = ()=>{ setVessel($('inpVessel').value); render(); };
+  $('selKnownHolds').onchange = ()=>{ const v=$('selKnownHolds').value; if(v) $('inpHold').value=v; };
+
+  $('btnFillAir').onclick = ()=>{
+    if(!$('inpO2').value) $('inpO2').value = '20.9';
+    if(!$('inpCO').value)  $('inpCO').value  = '0';
+    if(!$('inpH2S').value) $('inpH2S').value = '0';
+    if(!$('inpCH4').value) $('inpCH4').value = '0.00';
+  };
+
+  $('btnAdd').onclick = async ()=>{
+    const vessel = getVessel();
+    if(!vessel){ alert('Set the Vessel first.'); return; }
+    const hold = $('inpHold').value.trim();
+    if(!hold){ alert('Enter the Hold.'); return; }
+    const t = $('inpTemp').value;
+    const ts = $('inpTime').value ? new Date($('inpTime').value).getTime() : Date.now();
+    const rec = await addReading({
+      vessel, hold, ts,
+      temp: t,
+      o2: $('inpO2').value, co: $('inpCO').value, h2s: $('inpH2S').value, ch4: $('inpCH4').value,
+      notes: $('inpNotes').value
+    });
+    addKnownHold(vessel, hold);
+    appendBackup(rec); // optional file backup
+
+    // reset for next entry
+    $('inpNotes').value = '';
+    $('inpTemp').value = '';
+    ['inpO2','inpCO','inpH2S','inpCH4'].forEach(id=>$(id).value='');
+    $('inpTime').value = new Date().toISOString().slice(0,16);
+    render(); updateCounts();
+  };
+
+  $('btnFilter').onclick = render;
+  $('selLimit').onchange = render;
+  $('fltVessel').onchange = render;
+  $('fltHold').onchange = render;
+
+  $('btnExportJSON').onclick = exportJSON;
+  $('btnExportCSV').onclick = exportCSV;
+  $('btnImport').onclick = async ()=>{
+    const f = $('fileImport').files[0];
+    if(!f) return alert('Choose a JSON file first.');
+    await importJSON(f); await render(); updateCounts();
+  };
+
+  $('btnPurge').onclick = async ()=>{
+    const d = Number($('selDays').value);
+    const n = await purgeOld(d);
+    await render(); updateCounts();
+    alert(`Purged ${n} records older than ${d} days.`);
+  };
+
+  $('btnPickFile').onclick = pickBackupFile;
+
+  // periodic retention (every 6h)
+  setInterval(async ()=>{
+    await purgeOld(Number($('selDays').value));
+    updateCounts();
+  }, 6*60*60*1000);
+}
+
+/* ===== Notes =====
+- Each reading carries Vessel + Hold + Temp + O2/CO/H2S/CH4 + Notes, timestamped.
+- Vessel is stored in localStorage; holds list is vessel-specific and auto-learns from entries.
+- Data lives in IndexedDB (durable until user clears site data). Optional rolling file backup via File System Access API.
+- Color cues: temp ≥50°C, O2 ≥23.5%, CO ≥25 ppm, H2S ≥5 ppm, CH4 ≥1% show as warning (adjust thresholds as needed).
+*/
+</script>
+</body>
+</html>
