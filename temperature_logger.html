@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Temperature Logger (Offline, 30-day retention)</title>
+<style>
+  :root{--bg:#0f1320;--panel:#141a2a;--ink:#e9eefb;--muted:#9fb0d0;--accent:#6ea8fe;--ok:#38d39f;--warn:#f7c948}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto}
+  header{padding:16px 20px;border-bottom:1px solid #223}
+  h1{margin:0;font-size:18px}
+  #wrap{display:grid;grid-template-columns:340px 1fr;gap:16px;padding:16px}
+  .card{background:var(--panel);border:1px solid #223;border-radius:10px;padding:14px}
+  label{display:block;font-size:13px;color:var(--muted);margin:8px 0 4px}
+  input,textarea,select,button{width:100%;padding:10px;border-radius:8px;border:1px solid #334;background:#0f1320;color:var(--ink)}
+  button{background:var(--accent);border:none;cursor:pointer}
+  button.secondary{background:#2a3350}
+  .row{display:flex;gap:8px}
+  .row>*{flex:1}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{border-bottom:1px solid #223;padding:8px;text-align:left;vertical-align:top}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;border:1px solid #334;color:var(--muted)}
+  .ok{color:var(--ok)} .warn{color:var(--warn)}
+  .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
+  .right{margin-left:auto}
+  .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
+</style>
+</head>
+<body>
+<header>
+  <h1>Temperature Logger — Offline (IndexedDB) · <span id="status" class="pill">init…</span></h1>
+</header>
+
+<div id="wrap">
+  <!-- LEFT: Entry + Tools -->
+  <section class="card">
+    <h3 style="margin:0 0 8px">New Reading</h3>
+    <div class="row">
+      <div>
+        <label>Temperature (°C)</label>
+        <input id="inpTemp" type="number" step="0.1" placeholder="e.g. 22.5" />
+      </div>
+      <div>
+        <label>Timestamp</label>
+        <input id="inpTime" type="datetime-local" />
+      </div>
+    </div>
+    <label>Notes</label>
+    <textarea id="inpNotes" rows="3" placeholder="Optional observation…"></textarea>
+    <div class="bar">
+      <button id="btnAdd">Save reading</button>
+      <span id="pending" class="pill">0 saved</span>
+      <span class="right mono" id="storeInfo"></span>
+    </div>
+    <hr style="border-color:#223;margin:14px 0">
+    <h3 style="margin:0 0 8px">Backups</h3>
+    <div class="row">
+      <button class="secondary" id="btnExportJSON">Export JSON</button>
+      <button class="secondary" id="btnExportCSV">Export CSV</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="fileImport" type="file" accept=".json,application/json" />
+      <button id="btnImport">Import JSON</button>
+    </div>
+    <div class="bar">
+      <button class="secondary" id="btnPickFile">Pick backup file (optional)</button>
+      <span id="fsStatus" class="pill">no file</span>
+    </div>
+    <hr style="border-color:#223;margin:14px 0">
+    <h3 style="margin:0 0 8px">Retention</h3>
+    <div class="row">
+      <select id="selDays">
+        <option value="30" selected>Keep 30 days</option>
+        <option value="60">Keep 60 days</option>
+        <option value="90">Keep 90 days</option>
+        <option value="365">Keep 365 days</option>
+      </select>
+      <button class="secondary" id="btnPurge">Purge now</button>
+    </div>
+  </section>
+
+  <!-- RIGHT: Records -->
+  <section class="card">
+    <div class="row" style="align-items:flex-end">
+      <div>
+        <h3 style="margin:0 0 8px">Recorded Readings</h3>
+        <div class="row">
+          <div>
+            <label>From</label>
+            <input id="fltFrom" type="date">
+          </div>
+          <div>
+            <label>To</label>
+            <input id="fltTo" type="date">
+          </div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="secondary" id="btnFilter">Filter</button>
+          </div>
+        </div>
+      </div>
+      <div class="right">
+        <label>Show</label>
+        <select id="selLimit">
+          <option>100</option><option selected>500</option><option>2000</option><option>All</option>
+        </select>
+      </div>
+    </div>
+
+    <table id="tbl">
+      <thead><tr><th>Date/Time</th><th>°C</th><th>Notes</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </section>
+</div>
+
+<script>
+/* ===== IndexedDB setup ===== */
+const DB_NAME = 'tempLoggerDB';
+const DB_VER  = 1;
+const STORE   = 'logs';
+let db;
+
+const openReq = indexedDB.open(DB_NAME, DB_VER);
+openReq.onupgradeneeded = (e) => {
+  const _db = e.target.result;
+  if (!_db.objectStoreNames.contains(STORE)) {
+    const os = _db.createObjectStore(STORE, { keyPath: 'id' });
+    os.createIndex('ts', 'ts', { unique:false });
+  }
+};
+openReq.onsuccess = (e) => { db = e.target.result; initUI(); };
+openReq.onerror   = () => alert('Failed to open local store.');
+
+/* ===== Utilities ===== */
+const $ = (id) => document.getElementById(id);
+const fmtDT = (ms) => new Date(ms).toLocaleString();
+const daysToMs = d => d*24*60*60*1000;
+
+function tx(store, mode='readonly'){ return db.transaction([STORE], mode).objectStore(STORE); }
+
+function addReading(temp, ts, notes){
+  return new Promise((res, rej)=>{
+    const rec = { id: crypto.randomUUID(), ts, temp: Number(temp), notes: (notes||"").trim() };
+    const req = tx(STORE,'readwrite').put(rec);
+    req.onsuccess = () => res(rec);
+    req.onerror = (e) => rej(e);
+  });
+}
+
+function deleteReading(id){
+  return new Promise((res,rej)=>{
+    const req = tx(STORE,'readwrite').delete(id);
+    req.onsuccess = res; req.onerror = rej;
+  });
+}
+
+function listReadings({from, to, limit}={}){
+  return new Promise((res)=>{
+    const out = [];
+    const idx = tx(STORE).index('ts');
+    const range = (from||to) ? IDBKeyRange.bound(from||0, to||Number.MAX_SAFE_INTEGER) : null;
+    const req = (range ? idx.openCursor(range,'prev') : idx.openCursor(null,'prev'));
+    req.onsuccess = (e)=>{
+      const c = e.target.result;
+      if(!c) return res(out);
+      if (limit && out.length >= limit) return res(out);
+      out.push(c.value);
+      c.continue();
+    };
+  });
+}
+
+function countAll(){
+  return new Promise((res)=> {
+    const req = tx(STORE).count(); req.onsuccess = () => res(req.result);
+  });
+}
+
+function purgeOld(days){
+  return new Promise((res)=>{
+    const cutoff = Date.now() - daysToMs(days);
+    const store = tx(STORE,'readwrite');
+    const idx = store.index('ts');
+    const range = IDBKeyRange.upperBound(cutoff, true);
+    let removed = 0;
+    idx.openCursor(range).onsuccess = (e)=>{
+      const c = e.target.result; if(!c){ res(removed); return; }
+      store.delete(c.primaryKey); removed++; c.continue();
+    };
+  });
+}
+
+/* ===== Optional File System Access API (rolling JSONL backup) ===== */
+let fileHandle = null;
+async function pickBackupFile(){
+  if (!('showSaveFilePicker' in window)) {
+    $('fsStatus').textContent = 'not supported';
+    return;
+  }
+  fileHandle = await showSaveFilePicker({
+    suggestedName: 'temp-logs.jsonl',
+    types: [{description:'JSON Lines', accept:{'application/json':['.jsonl','.json']}}]
+  });
+  $('fsStatus').textContent = 'file linked';
+}
+async function appendBackup(rec){
+  try{
+    if(!fileHandle) return;
+    const writable = await fileHandle.createWritable({keepExistingData:true});
+    await writable.seek((await fileHandle.getFile()).size);
+    await writable.write(JSON.stringify(rec) + "\n");
+    await writable.close();
+  }catch(_){ /* ignore */ }
+}
+
+/* ===== Export / Import ===== */
+async function exportJSON(){
+  const all = await listReadings({limit:null});
+  const blob = new Blob([JSON.stringify(all, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `temp-logs-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+async function exportCSV(){
+  const all = await listReadings({limit:null});
+  const esc = (s)=> `"${String(s??'').replace(/"/g,'""')}"`;
+  const rows = [['id','timestamp_iso','temperature_c','notes']]
+    .concat(all.map(r => [r.id, new Date(r.ts).toISOString(), r.temp, r.notes]))
+    .map(arr => arr.map(esc).join(','))
+    .join('\n');
+  const blob = new Blob([rows], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `temp-logs-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+async function importJSON(file){
+  const text = await file.text();
+  const arr = JSON.parse(text);
+  const store = tx(STORE,'readwrite');
+  await new Promise((res)=>{
+    let i=0;
+    (function putNext(){
+      if(i>=arr.length) return res();
+      const rec = arr[i++];
+      // coerce minimal fields
+      const safe = { id: rec.id || crypto.randomUUID(), ts: Number(rec.ts||Date.now()), temp: Number(rec.temp||rec.temperature||0), notes: String(rec.notes||'') };
+      store.put(safe).onsuccess = putNext;
+    })();
+  });
+}
+
+/* ===== UI glue ===== */
+async function render(){
+  // filters
+  const from = $('fltFrom').value ? new Date($('fltFrom').value).setHours(0,0,0,0) : null;
+  const to   = $('fltTo').value   ? new Date($('fltTo').value).setHours(23,59,59,999) : null;
+  const limV = $('selLimit').value;
+  const limit = (limV==='All') ? null : Number(limV);
+
+  const recs = await listReadings({from, to, limit});
+  const tb = $('rows'); tb.innerHTML = '';
+  for(const r of recs){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="mono">${fmtDT(r.ts)}</td>
+      <td class="${r.temp>=50?'warn':'ok'} mono">${r.temp.toFixed(1)}</td>
+      <td>${(r.notes||'').replace(/</g,'&lt;')}</td>
+      <td><button class="secondary" data-id="${r.id}">Delete</button></td>`;
+    tb.appendChild(tr);
+  }
+  tb.querySelectorAll('button[data-id]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      await deleteReading(btn.dataset.id);
+      render(); updateCounts();
+    };
+  });
+}
+
+async function updateCounts(){
+  const n = await countAll();
+  $('pending').textContent = `${n} saved locally`;
+}
+
+async function initUI(){
+  $('status').textContent = 'local store ready';
+  $('inpTime').value = new Date().toISOString().slice(0,16);
+  $('selDays').value = '30';
+  $('storeInfo').textContent = `DB:${DB_NAME} • Store:${STORE}`;
+  await purgeOld(Number($('selDays').value)); // enforce on load
+  await render(); updateCounts();
+
+  $('btnAdd').onclick = async ()=>{
+    const t = Number($('inpTemp').value);
+    if (Number.isNaN(t)) { alert('Enter a temperature'); return; }
+    const ts = $('inpTime').value ? new Date($('inpTime').value).getTime() : Date.now();
+    const notes = $('inpNotes').value;
+    const rec = await addReading(t, ts, notes);
+    appendBackup(rec); // optional file backup
+    $('inpNotes').value = '';
+    $('inpTemp').value = '';
+    $('inpTime').value = new Date().toISOString().slice(0,16);
+    render(); updateCounts();
+  };
+
+  $('btnFilter').onclick = render;
+  $('selLimit').onchange = render;
+
+  $('btnExportJSON').onclick = exportJSON;
+  $('btnExportCSV').onclick = exportCSV;
+  $('btnImport').onclick = async ()=>{
+    const f = $('fileImport').files[0];
+    if(!f) return alert('Choose a JSON file first.');
+    await importJSON(f); await render(); updateCounts();
+  };
+
+  $('btnPurge').onclick = async ()=>{
+    const d = Number($('selDays').value);
+    const n = await purgeOld(d);
+    await render(); updateCounts();
+    alert(`Purged ${n} records older than ${d} days.`);
+  };
+
+  $('btnPickFile').onclick = async ()=>{
+    await pickBackupFile();
+  };
+
+  // periodic retention (every 6h)
+  setInterval(async ()=>{
+    await purgeOld(Number($('selDays').value));
+    updateCounts();
+  }, 6*60*60*1000);
+}
+
+/* ===== Notes =====
+- Data lives in the browser (IndexedDB) and survives restarts; it only disappears if the user clears site data.
+- Optional backup file keeps a rolling JSONL for extra safety (Chromium/Android with File System Access API).
+- To use in Safari, it’s best to open via a local server (e.g., `python -m http.server`) for widest storage support.
+*/
+</script>
+</body>
+</html>
