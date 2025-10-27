@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>DRI (B) Wet Reactivity — Sealed Hold Gas Simulator</title>
+<style>
+  :root{--bg:#0d1321;--panel:#131a2a;--ink:#e9eefb;--muted:#9fb0d0;--accent:#6ea8fe;--ok:#a8ffbd;--warn:#ffd48a;--bad:#ffb3b3}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:system-ui,Segoe UI,Roboto,Inter,Arial}
+  #wrap{display:grid;grid-template-columns:340px 1fr;gap:16px;min-height:100vh}
+  aside{background:var(--panel);padding:16px;overflow:auto}
+  main{padding:16px;display:grid;gap:12px;grid-auto-rows:min-content}
+  h1{font-size:18px;margin:0 0 8px}
+  h2{font-size:14px;margin:16px 0 8px;color:var(--muted)}
+  label{display:grid;grid-template-columns:1fr auto;gap:8px;margin:8px 0}
+  input[type=range]{width:200px}
+  input,button,select{background:#0f1525;color:var(--ink);border:1px solid #2a3553;border-radius:6px;padding:6px 8px}
+  .row{display:flex;gap:8px;align-items:center}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px}
+  .ok{background:var(--ok);color:#062b10}
+  .warn{background:var(--warn);color:#271d00}
+  .bad{background:var(--bad);color:#2b0000}
+  canvas{background:#0a0f1c;border:1px solid #263256;border-radius:8px}
+  table{border-collapse:collapse;width:100%;font-size:12px}
+  td,th{border-bottom:1px solid #1f2943;padding:6px}
+  .muted{color:var(--muted)}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <aside>
+    <h1>Wet-Reactive DRI (B) — Sealed Hold</h1>
+    <div class="muted" style="font-size:12px">
+      Screening model for H₂ accumulation &amp; O₂ depletion in a sealed hold.
+      Calibrate rates to your cargo/process data.
+    </div>
+
+    <h2>Geometry &amp; Initial State</h2>
+    <label>Hold free volume (m³)
+      <input id="V" type="number" step="1" value="30000">
+    </label>
+    <label>Ambient pressure (kPa)
+      <input id="P0" type="number" step="0.1" value="101.3">
+    </label>
+    <label>Initial air temperature (°C)
+      <input id="T0" type="number" step="1" value="25">
+    </label>
+    <label>Initial O₂ (% v/v)
+      <input id="O2_0" type="number" step="0.5" value="21">
+    </label>
+
+    <h2>Cargo</h2>
+    <label>DRI(B) mass (tonnes)
+      <input id="m_t" type="number" step="1" value="45000">
+    </label>
+    <label>Moisture (% total mass)
+      <input id="moist" type="number" step="0.1" value="1.0">
+    </label>
+    <label>Reactivity factor (–)
+      <input id="react" type="number" step="0.1" value="1.0">
+    </label>
+
+    <h2>Kinetics (tune these)</h2>
+    <label>k<sub>H₂</sub> (mol·s⁻¹ per tonne at 25 °C per 1.0 moisture)
+      <input id="kH2" type="number" step="0.1" value="4.0">
+    </label>
+    <label>k<sub>O₂</sub> (mol·s⁻¹ per 100 kPa O₂ per tonne at 25 °C)
+      <input id="kO2" type="number" step="0.1" value="1.0">
+    </label>
+    <label>Q10 (rate multiplier per +10 °C)
+      <input id="Q10" type="number" step="0.1" value="2.0">
+    </label>
+
+    <h2>Thermal (optional)</h2>
+    <label>Enable heat coupling
+      <select id="heatOn"><option value="0">Off</option><option value="1">On</option></select>
+    </label>
+    <label>Exotherm per mol H₂ (kJ/mol)
+      <input id="dH" type="number" step="1" value="20">
+    </label>
+    <label>Effective heat capacity (kJ/K)
+      <input id="Ceff" type="number" step="10" value="50000">
+    </label>
+    <label>Heat loss coeff (kW/K)
+      <input id="U" type="number" step="0.1" value="5">
+    </label>
+
+    <h2>Run</h2>
+    <label>Duration (hours)
+      <input id="hours" type="number" step="1" value="72">
+    </label>
+    <label>Time step (s)
+      <input id="dt" type="number" step="1" value="5">
+    </label>
+    <div class="row">
+      <button id="run">Run simulation</button>
+      <button id="csv">Export CSV</button>
+    </div>
+    <div style="margin-top:8px" class="muted mono" id="status">idle…</div>
+
+    <h2>Alarms</h2>
+    <div id="alarms" class="mono"></div>
+
+    <h2>Notes</h2>
+    <ul class="muted">
+      <li>Assumes ideal gas, well-mixed headspace, sealed hold.</li>
+      <li>H₂ LFL ≈ 4% v/v, UEL ≈ 75% v/v (for air at ambient conditions).</li>
+      <li>Use your own measured kinetics for realism.</li>
+    </ul>
+  </aside>
+
+  <main>
+    <div class="grid2">
+      <canvas id="chart1" width="700" height="260"></canvas>
+      <canvas id="chart2" width="700" height="260"></canvas>
+    </div>
+    <div class="grid2">
+      <canvas id="chart3" width="700" height="260"></canvas>
+      <div>
+        <h2>Snapshot</h2>
+        <table id="snap">
+          <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <h2>Summary</h2>
+        <div id="summary" class="muted mono"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+// ---------- helpers ----------
+const R = 8.314462618; // J/(mol·K)
+function clamp(x,a,b){return Math.max(a,Math.min(b,x));}
+function line(ctx,x0,y0,x1,y1){ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();}
+
+// ---------- charts (vanilla canvas, no external libs) ----------
+function makeChart(canvas, yLabel){
+  const ctx = canvas.getContext('2d');
+  return {
+    draw(series, labels){
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      const W=canvas.width, H=canvas.height, L=48, B=28, T=18, Rm=12;
+      // axes
+      ctx.strokeStyle = '#2a3553'; ctx.lineWidth=1;
+      line(ctx,L,T,L,H-B); line(ctx,L,H-B,W-Rm,H-B);
+      // y ticks
+      const yMin = Math.min(...series.flat().map(p=>p[1]));
+      const yMax = Math.max(...series.flat().map(p=>p[1]));
+      const ymin = Number.isFinite(yMin)? yMin : 0;
+      const ymax = Number.isFinite(yMax)? yMax : 1;
+      const pad = (ymax - ymin) * 0.08 || 1;
+      const Y0 = ymin - pad, Y1 = ymax + pad;
+      const x0 = series[0]?.[0]?.[0] ?? 0;
+      const x1 = series[0]?.[series[0].length-1]?.[0] ?? 1;
+      const xt = v => L + (W-L-Rm) * (v - x0)/(x1 - x0 || 1);
+      const yt = v => H-B - (H-B-T) * (v - Y0)/(Y1 - Y0 || 1);
+      ctx.fillStyle = '#9fb0d0'; ctx.font = '12px ui-monospace,monospace';
+      for(let i=0;i<5;i++){
+        const f=i/4, yv=Y0+(Y1-Y0)*f, y=yt(yv);
+        line(ctx,L,y,W-Rm,y);
+        ctx.fillText(yv.toFixed( (Y1-Y0)<2 ? 2 : (Y1-Y0)<20?1:0 ), 6, y+4);
+      }
+      // series
+      const palette = ['#6ea8fe','#a8ffbd','#ffd48a','#ffb3b3','#cfa9ff'];
+      series.forEach((pts, si)=>{
+        ctx.beginPath();
+        pts.forEach((p,j)=>{
+          const x=xt(p[0]), y=yt(p[1]);
+          j?ctx.lineTo(x,y):ctx.moveTo(x,y);
+        });
+        ctx.strokeStyle = palette[si % palette.length];
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      });
+      // labels
+      ctx.fillStyle='#9fb0d0';
+      ctx.fillText(yLabel, W-130, 16);
+      if(labels){
+        let x=60, y=18;
+        labels.forEach((txt,i)=>{
+          ctx.fillStyle = palette[i % palette.length];
+          ctx.fillRect(x-14, y-10, 10, 10);
+          ctx.fillStyle = '#cfe1ff';
+          ctx.fillText(txt, x, y);
+          x += ctx.measureText(txt).width + 36;
+        });
+      }
+    }
+  }
+}
+
+const chartH = makeChart(document.getElementById('chart1'), 'Gas fraction (v/v)');
+const chartP = makeChart(document.getElementById('chart2'), 'Pressure (kPa)');
+const chartT = makeChart(document.getElementById('chart3'), 'Temperature (°C)');
+
+// ---------- simulation ----------
+function simulate(cfg){
+  const {
+    V, P0, T0C, O2_0, m_t, moist, react, kH2, kO2, Q10, heatOn, dH, Ceff, U, hours, dt
+  } = cfg;
+  const T0 = T0C + 273.15;
+  const steps = Math.round((hours*3600)/dt);
+  // initial moles (air split)
+  const n0 = (P0*1000) * V / (R*T0);       // mol
+  let nO2 = n0 * (O2_0/100);
+  let nN2 = n0 - nO2;
+  let nH2 = 0.0;
+  let T = T0;    // K
+  // alarms & logs
+  const outH=[], outP=[], outT=[], outO2=[];
+  const alarms = [];
+  let lflSeen=false, uelSeen=false, lowO2=false;
+
+  // constants
+  const mass = m_t;               // tonnes
+  const moistFrac = moist/100;    // –
+  const baseH2 = kH2 * mass * moistFrac * react; // mol/s at 25°C
+  const baseO2 = kO2 * mass * react;             // mol/s per 100 kPa O2 at 25°C
+
+  for(let i=0;i<=steps;i++){
+    const t = i*dt;
+    // gas fractions & state
+    const nTot = nO2 + nN2 + nH2;
+    const xO2 = nO2/(nTot||1e-9), xH2 = nH2/(nTot||1e-9);
+    // pressure (Pa) from ideal gas
+    const P = nTot * R * T / V; // Pa
+    const PkPa = P/1000;
+
+    // rate temperature multiplier
+    const fT = Math.pow(Q10, (T - (25+273.15))/10);
+
+    // H2 generation (mol/s), simple inhibition if approaching UEL to avoid runaway nonphysical
+    const inhib = clamp(1 - xH2/0.8, 0, 1);
+    const rH2 = baseH2 * fT * inhib;
+
+    // O2 consumption (mol/s), proportional to O2 partial pressure
+    const pO2kPa = xO2 * PkPa;
+    const rO2 = baseO2 * fT * (pO2kPa/100); // referenced to 100 kPa O2
+
+    // integrate
+    nH2 += rH2 * dt;
+    nO2 = Math.max(0, nO2 - rO2 * dt);
+
+    // heat coupling
+    if(heatOn){
+      // exotherm from H2 generation
+      const Qdot = rH2 * dH * 1000;     // J/s (kJ/mol * 1000)
+      const loss = U*1000 * (T - T0);   // W ~ J/s
+      const dT = (Qdot - loss) * dt / (Ceff*1000); // Ceff in kJ/K -> *1000 to J/K
+      T += dT;
+    }
+
+    // record
+    outH.push([t/3600, xH2*100]);
+    outO2.push([t/3600, xO2*100]);
+    outP.push([t/3600, PkPa]);
+    outT.push([t/3600, T-273.15]);
+
+    // alarms
+    if(!lflSeen && xH2>=0.04){lflSeen=true; alarms.push({t, msg:'H₂ ≥ LFL (≈4% v/v)', cls:'bad'});}
+    if(!uelSeen && xH2>=0.75){uelSeen=true; alarms.push({t, msg:'H₂ ≥ UEL (≈75% v/v)', cls:'bad'});}
+    if(!lowO2 && xO2<=0.195){lowO2=true; alarms.push({t, msg:'O₂ ≤ 19.5% (oxygen-deficient)', cls:'warn'});}
+  }
+
+  return {outH, outO2, outP, outT, alarms, final:{
+    H2pct: outH.at(-1)[1], O2pct: outO2.at(-1)[1], PkPa: outP.at(-1)[1], TC: outT.at(-1)[1]
+  }};
+}
+
+// ---------- UI wiring ----------
+function val(id){return Number(document.getElementById(id).value);}
+function txt(id){return document.getElementById(id);}
+function setStatus(s){txt('status').textContent=s;}
+
+function runSim(){
+  const cfg = {
+    V: val('V'), P0: val('P0'), T0C: val('T0'), O2_0: val('O2_0'),
+    m_t: val('m_t'), moist: val('moist'), react: val('react'),
+    kH2: val('kH2'), kO2: val('kO2'), Q10: val('Q10'),
+    heatOn: Number(txt('heatOn').value), dH: val('dH'),
+    Ceff: val('Ceff'), U: val('U'), hours: val('hours'), dt: val('dt')
+  };
+  setStatus('running…');
+  const t0 = performance.now();
+  const res = simulate(cfg);
+  const t1 = performance.now();
+  setStatus(`done in ${(t1-t0).toFixed(1)} ms`);
+
+  chartH.draw([res.outH, res.outO2], ['H₂ % v/v','O₂ % v/v']);
+  chartP.draw([res.outP], ['Pressure']);
+  chartT.draw([res.outT], ['Temperature']);
+
+  // alarms
+  const al = txt('alarms');
+  al.innerHTML = res.alarms.map(a=>{
+    const hr = (a.t/3600).toFixed(2);
+    const cls = a.cls==='bad'?'pill bad':a.cls==='warn'?'pill warn':'pill';
+    return `<div><span class="${cls}">${hr} h</span> ${a.msg}</div>`;
+  }).join('') || '<span class="muted">none</span>';
+
+  // snapshot
+  const tb = document.querySelector('#snap tbody');
+  const f = res.final;
+  tb.innerHTML = `
+    <tr><td>Final H₂</td><td>${f.H2pct.toFixed(2)} % v/v</td></tr>
+    <tr><td>Final O₂</td><td>${f.O2pct.toFixed(2)} % v/v</td></tr>
+    <tr><td>Final Pressure</td><td>${f.PkPa.toFixed(2)} kPa</td></tr>
+    <tr><td>Final Temperature</td><td>${f.TC.toFixed(2)} °C</td></tr>
+  `;
+
+  // summary
+  const sum = txt('summary');
+  const flags = [];
+  if(f.H2pct>=4) flags.push('H₂ above LFL');
+  if(f.O2pct<=19.5) flags.push('O₂ deficient');
+  sum.textContent = flags.length ? '⚠ ' + flags.join(' · ') : 'No thresholds exceeded in final state';
+
+  // stash last series for CSV export
+  window.__lastSeries = res;
+}
+
+function exportCSV(){
+  const res = window.__lastSeries;
+  if(!res){alert('Run the simulation first.'); return;}
+  const rows = ['time_h,H2_pct,O2_pct,Pressure_kPa,Temp_C'];
+  const n = res.outH.length;
+  for(let i=0;i<n;i++){
+    const t = res.outH[i][0];
+    const h2 = res.outH[i][1];
+    const o2 = res.outO2[i][1];
+    const p = res.outP[i][1];
+    const tc = res.outT[i][1];
+    rows.push([t,h2,o2,p,tc].join(','));
+  }
+  const blob = new Blob([rows.join('\n')], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'driB_sealed_hold_sim.csv';
+  a.click();
+}
+
+document.getElementById('run').addEventListener('click', runSim);
+document.getElementById('csv').addEventListener('click', exportCSV);
+</script>
+</body>
+</html>
