@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pile Survey Tool</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    margin: 0; padding: 1rem;
+    background: #fafafa; color: #222;
+  }
+  h1 { text-align: center; margin-bottom: 1rem; }
+  section {
+    background: white;
+    border-radius: 10px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  }
+  button {
+    background: #0078d7;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0.6rem 1.2rem;
+    margin-top: 0.5rem;
+    cursor: pointer;
+  }
+  button:hover { background: #005fa3; }
+  input, select {
+    width: 100%;
+    margin: 0.3rem 0;
+    padding: 0.5rem;
+    font-size: 1rem;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+  }
+  p { margin: 0.3rem 0; }
+  #inputs input { width: 32%; display: inline-block; margin-right: 2%; }
+</style>
+</head>
+<body>
+<h1>📏 Pile Survey Tool</h1>
+
+<section id="telemetry">
+  <h2>Telemetry</h2>
+  <button id="getGPS">Get GPS</button>
+  <p id="gpsData">Lat/Lon not set</p>
+  <button id="getHeading">Get Compass</button>
+  <p id="headingData">Heading not set</p>
+</section>
+
+<section id="distance">
+  <h2>Distance (GPS)</h2>
+  <input type="number" id="lat1" placeholder="Latitude 1">
+  <input type="number" id="lon1" placeholder="Longitude 1">
+  <input type="number" id="lat2" placeholder="Latitude 2">
+  <input type="number" id="lon2" placeholder="Longitude 2">
+  <button id="calcDist">Calculate Distance</button>
+  <p id="distResult">—</p>
+</section>
+
+<section id="volume">
+  <h2>Volume Estimator</h2>
+  <label for="shape">Shape:</label>
+  <select id="shape">
+    <option value="cone">Conical Pile</option>
+    <option value="prism">Rectangular Prism</option>
+    <option value="trapezoid">Trapezoidal Pile</option>
+  </select>
+  <div id="inputs"></div>
+  <button id="calcVolume">Calculate Volume</button>
+  <p id="volResult">—</p>
+</section>
+
+<script>
+(function(){
+  const gpsBtn = document.getElementById('getGPS');
+  const gpsData = document.getElementById('gpsData');
+  const headingBtn = document.getElementById('getHeading');
+  const headingData = document.getElementById('headingData');
+  const distBtn = document.getElementById('calcDist');
+  const distResult = document.getElementById('distResult');
+  const volBtn = document.getElementById('calcVolume');
+  const volResult = document.getElementById('volResult');
+  const shapeSel = document.getElementById('shape');
+  const inputsDiv = document.getElementById('inputs');
+
+  // Populate volume inputs based on shape
+  const shapeFields = {
+    cone: ['Radius (m)', 'Height (m)'],
+    prism: ['Length (m)', 'Width (m)', 'Height (m)'],
+    trapezoid: ['Area 1 (m²)', 'Area 2 (m²)', 'Height (m)']
+  };
+  function renderInputs(shape) {
+    inputsDiv.innerHTML = '';
+    shapeFields[shape].forEach(lbl => {
+      const inp = document.createElement('input');
+      inp.type = 'number';
+      inp.placeholder = lbl;
+      inputsDiv.appendChild(inp);
+    });
+  }
+  renderInputs(shapeSel.value);
+  shapeSel.onchange = () => renderInputs(shapeSel.value);
+
+  // GPS
+  gpsBtn.onclick = () => {
+    if (!navigator.geolocation) return alert('GPS not supported');
+    gpsData.textContent = 'Getting position...';
+    navigator.geolocation.getCurrentPosition(pos => {
+      const { latitude, longitude, accuracy } = pos.coords;
+      gpsData.textContent = `Lat: ${latitude.toFixed(6)}, Lon: ${longitude.toFixed(6)}, ±${accuracy} m`;
+    }, err => gpsData.textContent = 'Error: ' + err.message);
+  };
+
+  // Compass
+  headingBtn.onclick = () => {
+    if (!('DeviceOrientationEvent' in window))
+      return alert('Compass not supported');
+    headingData.textContent = 'Waiting for heading...';
+    window.addEventListener('deviceorientation', e => {
+      const heading = e.alpha ? e.alpha.toFixed(1) : 'N/A';
+      headingData.textContent = `Heading: ${heading}°`;
+    }, { once: true });
+  };
+
+  // Distance
+  distBtn.onclick = () => {
+    const lat1 = parseFloat(document.getElementById('lat1').value);
+    const lon1 = parseFloat(document.getElementById('lon1').value);
+    const lat2 = parseFloat(document.getElementById('lat2').value);
+    const lon2 = parseFloat(document.getElementById('lon2').value);
+    if ([lat1, lon1, lat2, lon2].some(isNaN))
+      return alert('Enter all coordinates');
+    const d = getDistanceGPS(lat1, lon1, lat2, lon2);
+    distResult.textContent = `Distance: ${d.toFixed(2)} m`;
+  };
+
+  // Volume
+  volBtn.onclick = () => {
+    const shape = shapeSel.value;
+    const inputs = Array.from(inputsDiv.querySelectorAll('input')).map(i => parseFloat(i.value));
+    if (inputs.some(isNaN)) return alert('Fill all fields');
+    let v = 0;
+    if (shape === 'cone') {
+      const [r, h] = inputs;
+      v = (1/3) * Math.PI * r * r * h;
+    } else if (shape === 'prism') {
+      const [l, w, h] = inputs;
+      v = l * w * h;
+    } else if (shape === 'trapezoid') {
+      const [A1, A2, h] = inputs;
+      v = (1/3) * h * (A1 + A2 + Math.sqrt(A1*A2));
+    }
+    volResult.textContent = `Volume: ${v.toFixed(2)} m³`;
+  };
+
+  // Helper
+  function getDistanceGPS(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const toRad = x => x * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+})();
+</script>
+</body>
+</html>
