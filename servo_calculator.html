@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Servo → Knee Multi-Link Ratio Tool</title>
+<style>
+  :root { --bg:#0f1220; --panel:#171b2e; --ink:#e8ecff; --muted:#aab1d9; --accent:#6eb2ff; }
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:14px/1.3 system-ui,Segoe UI,Roboto,Helvetica,Arial}
+  .wrap{display:grid;grid-template-columns: 360px 1fr; height:100%}
+  .panel{background:var(--panel);padding:14px 16px;overflow:auto;border-right:1px solid #2b3153}
+  .panel h2{margin:8px 0 6px;font-size:16px}
+  .grid{display:grid;grid-template-columns:1fr 1fr; gap:8px}
+  label{display:flex;align-items:center;gap:8px}
+  input[type="number"]{width:90px}
+  input[type="range"]{width:100%}
+  .row{display:flex;gap:8px;align-items:center;margin:6px 0}
+  .pill{display:inline-block;background:#273158;color:var(--ink);padding:2px 8px;border-radius:999px;font-size:12px}
+  button{background:#28335d;color:var(--ink);border:1px solid #3a4470;border-radius:6px;padding:6px 10px;cursor:pointer}
+  button:hover{background:#324075}
+  canvas{background:#0b0e1a; width:100%; height:100%; display:block}
+  .subtle{color:var(--muted)}
+  .mono{font-family: ui-monospace,Consolas,Menlo,monospace}
+  .hr{height:1px;background:#2b3153;margin:10px 0}
+  .row > * { flex:1 }
+  .small{font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel">
+    <h2>Setup</h2>
+    <div class="row small subtle">Drag the <b>Servo Base</b> and <b>Knee Pivot</b> in the canvas.</div>
+
+    <div class="hr"></div>
+    <div class="row">
+      <label>Servo angle <span id="servoDegLbl" class="pill mono">0.0°</span></label>
+    </div>
+    <input id="servoDeg" type="range" min="0" max="180" step="0.1" value="60"/>
+
+    <div class="hr"></div>
+    <h2>Links</h2>
+    <div class="grid">
+      <label>L1 (servo horn) <input id="L1" type="number" step="0.001" value="0.012"></label>
+      <label>Enable L2 <input id="L2en" type="checkbox" checked></label>
+
+      <label>L2 (rod) <input id="L2" type="number" step="0.001" value="0.085"></label>
+      <label>Enable L3 <input id="L3en" type="checkbox" checked></label>
+
+      <label>L3 (hip link) <input id="L3" type="number" step="0.001" value="0.030"></label>
+      <label>Enable L4 <input id="L4en" type="checkbox"></label>
+
+      <label>L4 (tendon) <input id="L4" type="number" step="0.001" value="0.030"></label>
+      <span></span>
+    </div>
+    <div class="small subtle">Units are meters. Solver is planar (2D).</div>
+
+    <div class="hr"></div>
+    <h2>Results</h2>
+    <div class="row"><span>Knee angle</span><span class="mono" id="kneeOut">–</span></div>
+    <div class="row"><span>Turn ratio dθ<sub>knee</sub>/dθ<sub>servo</sub></span><span class="mono" id="ratioOut">–</span></div>
+    <div class="row"><span>Reach status</span><span class="mono" id="reachOut">–</span></div>
+
+    <div class="hr"></div>
+    <h2>Save / Load</h2>
+    <div class="row">
+      <button id="saveBtn">Copy JSON</button>
+      <button id="loadBtn">Load JSON</button>
+    </div>
+    <textarea id="cfgBox" class="mono" rows="6" style="width:100%;background:#0b0e1a;color:#dfe6ff;border:1px solid #2b3153;border-radius:6px;padding:6px;"></textarea>
+
+    <div class="hr"></div>
+    <div class="small subtle">
+      <b>Meaning of links</b><br/>
+      Servo(θ) → <b>L1</b> (horn) → <b>L2</b> (rod) → <b>L3</b> (hip link) → <b>L4</b> (tendon) → <b>Knee pivot</b> (calf).<br/>
+      Disable any of L2–L4 to use fewer links.
+    </div>
+  </div>
+
+  <canvas id="cv"></canvas>
+</div>
+
+<script>
+/* ---------- Tiny helpers ---------- */
+const TAU = Math.PI*2;
+const deg2rad = d=>d*Math.PI/180;
+const rad2deg = r=>r*180/Math.PI;
+function clamp(x,a,b){return Math.max(a,Math.min(b,x));}
+function dist(a,b){const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy);}
+
+/* ---------- State ---------- */
+const state = {
+  // world units = meters; canvas scales visually
+  servoBase: {x: -0.10, y: 0.00},   // fixed ground pivot
+  kneePivot: {x: +0.10, y: 0.00},   // fixed ground pivot
+  servoDeg: 60,
+  links: [0.012, 0.085, 0.030, 0.030],  // L1..L4
+  enabled: [true, true, true, false],   // L1 always true; toggles for L2..L4
+  // draw scale
+  m2px: 200,
+  dragging: null
+};
+
+/* ---------- UI refs ---------- */
+const elServo = document.getElementById('servoDeg');
+const elServoLbl = document.getElementById('servoDegLbl');
+const ids = ['L1','L2','L3','L4'];
+const enIds = ['L2en','L3en','L4en'];
+const kneeOut = document.getElementById('kneeOut');
+const ratioOut = document.getElementById('ratioOut');
+const reachOut = document.getElementById('reachOut');
+const cfgBox = document.getElementById('cfgBox');
+
+/* ---------- Canvas setup ---------- */
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+function fitCanvas(){
+  cv.width = cv.clientWidth*window.devicePixelRatio;
+  cv.height = cv.clientHeight*window.devicePixelRatio;
+  ctx.setTransform(state.m2px*window.devicePixelRatio, 0, 0, -state.m2px*window.devicePixelRatio, cv.width/2, cv.height/2);
+}
+window.addEventListener('resize', ()=>{fitCanvas(); draw();});
+fitCanvas();
+
+/* ---------- FABRIK solver (chain from A to B with fixed segment lengths) ---------- */
+function fabrikSolve(startTip, endPivot, segs, iters=64, eps=1e-5){
+  const n = segs.length+1; // joints count
+  let J = new Array(n).fill(0).map(_=>({x:0,y:0}));
+  // initialize linearly between start and end
+  for(let i=0;i<n;i++){
+    const t = i/(n-1);
+    J[i] = {x: startTip.x*(1-t)+endPivot.x*t, y: startTip.y*(1-t)+endPivot.y*t};
+  }
+  const base = {...startTip};
+  const target = {...endPivot};
+  const totalLen = segs.reduce((a,b)=>a+b,0);
+  if(dist(base,target) > totalLen) {
+    // unreachable: point toward target
+    for(let i=0;i<n-1;i++){
+      const dirx = (target.x - J[i].x);
+      const diry = (target.y - J[i].y);
+      const d = Math.hypot(dirx, diry)||1;
+      J[i+1] = {x: J[i].x + segs[i]*dirx/d, y: J[i].y + segs[i]*diry/d};
+    }
+    return {J, reachable:false};
+  }
+  for(let k=0;k<iters;k++){
+    // forward: end effector to target
+    J[n-1] = {...target};
+    for(let i=n-2;i>=0;i--){
+      const d = dist(J[i+1], J[i])||1;
+      const r = segs[i]/d;
+      J[i] = {x: (1-r)*J[i+1].x + r*J[i].x, y:(1-r)*J[i+1].y + r*J[i].y};
+    }
+    // backward: base to base
+    J[0] = {...base};
+    for(let i=0;i<n-1;i++){
+      const d = dist(J[i+1], J[i])||1;
+      const r = segs[i]/d;
+      J[i+1] = {x: (1-r)*J[i].x + r*J[i+1].x, y:(1-r)*J[i].y + r*J[i+1].y};
+    }
+    if(dist(J[n-1], target)<eps) break;
+  }
+  return {J, reachable:true};
+}
+
+/* ---------- Kinematics mapping ---------- */
+function computeMapping(servoDeg){
+  // gather enabled link lengths after L1
+  const L1 = parseFloat(document.getElementById('L1').value)||0.012;
+  const enabled = [true,
+    document.getElementById('L2en').checked,
+    document.getElementById('L3en').checked,
+    document.getElementById('L4en').checked
+  ];
+  const lens = [
+    L1,
+    enabled[1] ? parseFloat(document.getElementById('L2').value)||0 : 0,
+    enabled[2] ? parseFloat(document.getElementById('L3').value)||0 : 0,
+    enabled[3] ? parseFloat(document.getElementById('L4').value)||0 : 0
+  ];
+  // form chain AFTER the servo horn tip: i.e., L2..L4 nonzero
+  const Lafter = lens.slice(2).filter(v=>v>0);
+  const L2maybe = lens[1]; // the first rod after horn
+  const chainLens = [];
+  if (L2maybe>0) chainLens.push(L2maybe);
+  chainLens.push(...Lafter);
+
+  // servo horn tip position
+  const th = deg2rad(servoDeg);
+  const hornTip = {
+    x: state.servoBase.x + L1*Math.cos(th),
+    y: state.servoBase.y + L1*Math.sin(th)
+  };
+
+  // solve chain from hornTip to kneePivot
+  const {J, reachable} = fabrikSolve(hornTip, state.kneePivot, chainLens);
+  // J[0] = hornTip, J[last] = knee pivot.
+
+  // knee angle: orientation of the last segment entering the knee pivot
+  let kneeAngle = NaN;
+  if (J.length>=2){
+    const A = J[J.length-2], B = J[J.length-1]; // segment toward knee
+    kneeAngle = Math.atan2(B.y - A.y, B.x - A.x); // world
+  }
+  return {hornTip, joints:J, reachable, kneeAngle, L1};
+}
+
+/* ---------- Draw ---------- */
+function draw(){
+  ctx.clearRect(-cv.width, -cv.height, cv.width*2, cv.height*2);
+
+  // grid
+  ctx.save();
+  ctx.lineWidth = 1/state.m2px;
+  ctx.strokeStyle = 'rgba(180,200,255,0.08)';
+  for(let x=-2;x<=2;x+=0.05){ctx.beginPath();ctx.moveTo(x,-2);ctx.lineTo(x,2);ctx.stroke();}
+  for(let y=-2;y<=2;y+=0.05){ctx.beginPath();ctx.moveTo(-2,y);ctx.lineTo(2,y);ctx.stroke();}
+  ctx.restore();
+
+  // compute
+  const servoDeg = parseFloat(elServo.value);
+  elServoLbl.textContent = `${(+servoDeg).toFixed(1)}°`;
+  const map = computeMapping(servoDeg);
+
+  // draw ground pivots
+  drawPoint(state.servoBase, '#6eb2ff', 7);
+  drawLabel(state.servoBase, 'Servo Base');
+  drawPoint(state.kneePivot, '#f0a65b', 7);
+  drawLabel(state.kneePivot, 'Knee Pivot');
+
+  // draw servo horn
+  ctx.lineWidth = 3/state.m2px;
+  ctx.strokeStyle = '#6eb2ff';
+  ctx.beginPath();
+  ctx.moveTo(state.servoBase.x, state.servoBase.y);
+  ctx.lineTo(map.hornTip.x, map.hornTip.y);
+  ctx.stroke();
+
+  // draw chain joints
+  const J = map.joints;
+  if (J && J.length){
+    // horn tip point
+    drawPoint(map.hornTip, '#66e3a0', 6);
+    drawLabel(map.hornTip, 'L1 tip');
+    // segments to knee
+    for(let i=0;i<J.length-1;i++){
+      drawSegment(J[i], J[i+1], i===J.length-2 ? '#f0e06a' : '#c2cffc');
+      drawPoint(J[i+1], i===J.length-1 ? '#f0a65b' : '#c2cffc', 5);
+    }
+  }
+
+  // results
+  const kneeDeg = rad2deg(map.kneeAngle || 0);
+  kneeOut.textContent = isFinite(kneeDeg) ? `${kneeDeg.toFixed(2)}°` : 'NaN';
+
+  // numeric derivative for instantaneous ratio
+  const eps = 0.05;
+  const map2 = computeMapping(clamp(parseFloat(elServo.value)+eps, 0, 180));
+  const ratio = (rad2deg(map2.kneeAngle) - kneeDeg)/eps;
+  ratioOut.textContent = isFinite(ratio) ? ratio.toFixed(3) : 'NaN';
+  reachOut.textContent = map.reachable ? 'Reachable' : 'Unreachable (lengths too short)';
+
+  requestAnimationFrame(()=>{}); // noop to keep Chrome happy for repaint pacing
+}
+function drawPoint(p, color, px){
+  const r = px/state.m2px;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(p.x,p.y,r,0,TAU); ctx.fill(); ctx.restore();
+}
+function drawSegment(a,b,color){
+  ctx.save();
+  ctx.strokeStyle = color; ctx.lineWidth = 3/state.m2px;
+  ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); ctx.restore();
+}
+function drawLabel(p, text){
+  ctx.save();
+  ctx.setTransform(1,0,0,1,0,0);
+  const sx = p.x*state.m2px + cv.width/2;
+  const sy = -p.y*state.m2px + cv.height/2;
+  ctx.fillStyle = '#9fb3ff';
+  ctx.font = '12px ui-monospace,monospace';
+  ctx.fillText(text, sx+8, sy-8);
+  ctx.restore();
+}
+
+/* ---------- Dragging ground pivots ---------- */
+function screenToWorld(clientX, clientY){
+  const rect = cv.getBoundingClientRect();
+  const x = (clientX - rect.left) * window.devicePixelRatio;
+  const y = (clientY - rect.top) * window.devicePixelRatio;
+  const wx = (x - cv.width/2) / (state.m2px*window.devicePixelRatio);
+  const wy = -(y - cv.height/2) / (state.m2px*window.devicePixelRatio);
+  return {x:wx, y:wy};
+}
+function hit(p, m){
+  const r = 10/state.m2px;
+  return (Math.abs(p.x-m.x)<r && Math.abs(p.y-m.y)<r);
+}
+cv.addEventListener('mousedown', e=>{
+  const m = screenToWorld(e.clientX,e.clientY);
+  if (hit(state.servoBase, m)) state.dragging = 'servo';
+  else if (hit(state.kneePivot, m)) state.dragging = 'knee';
+});
+window.addEventListener('mousemove', e=>{
+  if (!state.dragging) return;
+  const m = screenToWorld(e.clientX,e.clientY);
+  if (state.dragging==='servo') state.servoBase = m;
+  if (state.dragging==='knee') state.kneePivot = m;
+  draw();
+});
+window.addEventListener('mouseup', ()=> state.dragging=null);
+
+/* ---------- Bind UI ---------- */
+function readInputs(){
+  state.servoDeg = parseFloat(elServo.value);
+  state.links[0] = parseFloat(document.getElementById('L1').value)||0.012;
+  for(let i=1;i<4;i++){
+    state.links[i] = parseFloat(document.getElementById(ids[i]).value)||0;
+  }
+  state.enabled = [true,
+    document.getElementById('L2en').checked,
+    document.getElementById('L3en').checked,
+    document.getElementById('L4en').checked
+  ];
+  draw();
+}
+elServo.addEventListener('input', readInputs);
+ids.forEach(id=>document.getElementById(id).addEventListener('change', readInputs));
+enIds.forEach(id=>document.getElementById(id).addEventListener('change', readInputs));
+
+/* ---------- Save/Load ---------- */
+document.getElementById('saveBtn').addEventListener('click', ()=>{
+  const cfg = {
+    servoBase: state.servoBase, kneePivot: state.kneePivot,
+    servoDeg: parseFloat(elServo.value),
+    L1: parseFloat(document.getElementById('L1').value),
+    L2: parseFloat(document.getElementById('L2').value),
+    L3: parseFloat(document.getElementById('L3').value),
+    L4: parseFloat(document.getElementById('L4').value),
+    L2en: document.getElementById('L2en').checked,
+    L3en: document.getElementById('L3en').checked,
+    L4en: document.getElementById('L4en').checked
+  };
+  cfgBox.value = JSON.stringify(cfg,null,2);
+  cfgBox.select(); document.execCommand('copy');
+});
+document.getElementById('loadBtn').addEventListener('click', ()=>{
+  try{
+    const cfg = JSON.parse(cfgBox.value);
+    state.servoBase = cfg.servoBase||state.servoBase;
+    state.kneePivot = cfg.kneePivot||state.kneePivot;
+    elServo.value = cfg.servoDeg ?? elServo.value;
+    ['L1','L2','L3','L4'].forEach(k=>{ if(cfg[k]!=null) document.getElementById(k).value = cfg[k]; });
+    ['L2en','L3en','L4en'].forEach(k=>{ if(cfg[k]!=null) document.getElementById(k).checked = cfg[k]; });
+    readInputs();
+  }catch(e){ alert('Invalid JSON'); }
+});
+
+/* ---------- Kick ---------- */
+readInputs(); draw();
+</script>
+</body>
+</html>
